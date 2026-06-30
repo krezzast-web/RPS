@@ -2,10 +2,16 @@ import React, { useState } from 'react';
 import Header from './components/Header';
 import Lobby from './components/Lobby';
 import GameRoom from './components/GameRoom';
+import Admin from './components/Admin';
 import { useGame } from './context/GameContext';
 import './App.css';
 
 function App() {
+  // Admin panel route — served at /admin, completely separate from the game UI
+  if (window.location.pathname === '/admin') {
+    return <Admin />;
+  }
+
   const { 
     activeView, 
     leaveRoom, 

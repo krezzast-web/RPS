@@ -5,6 +5,10 @@ export default function GameRoom() {
   const {
     walletAddress,
     username,
+    rpsRating,
+    playerWins,
+    playerLosses,
+    playerDraws,
     activeRoom,
     matchmakingState,
     userReady,
@@ -164,7 +168,7 @@ export default function GameRoom() {
               <span className="player-card-role">You</span>
               <div className="player-name-row">
                 <span className="player-card-name">{username}</span>
-                <span className="player-rank-badge">#34</span>
+                <span className="player-rank-badge">{rpsRating} RPS</span>
               </div>
             </div>
             {/* User wallet and copy button */}
@@ -184,15 +188,15 @@ export default function GameRoom() {
               <div className="player-card-wld-row">
                 <div className="wld-badge-item">
                   <span className="wld-badge win">W</span>
-                  <span className="wld-badge-val">13</span>
+                  <span className="wld-badge-val">{playerWins}</span>
                 </div>
                 <div className="wld-badge-item">
                   <span className="wld-badge draw">D</span>
-                  <span className="wld-badge-val">11</span>
+                  <span className="wld-badge-val">{playerDraws}</span>
                 </div>
                 <div className="wld-badge-item">
                   <span className="wld-badge loss">L</span>
-                  <span className="wld-badge-val">22</span>
+                  <span className="wld-badge-val">{playerLosses}</span>
                 </div>
               </div>
             </div>
@@ -220,13 +224,17 @@ export default function GameRoom() {
                   <span className="player-card-role">Opponent</span>
                   <div className="player-name-row">
                     <span className="player-card-name">{opponent.name}</span>
-                    <span className="player-rank-badge">#89</span>
+                    <span className="player-rank-badge">{opponent.rating} RPS</span>
                   </div>
                 </div>
                 {/* Opponent wallet and copy button */}
                 <div className="player-wallet-row">
-                  <span className="player-wallet-addr">Bana...84a</span>
-                  <button className="wallet-copy-btn" onClick={() => copyWalletAddress('BanaAddress84a', 'opponent')} title="Copy wallet address">
+                  <span className="player-wallet-addr">
+                    {opponent.wallet
+                      ? `${opponent.wallet.substring(0, 4)}...${opponent.wallet.substring(opponent.wallet.length - 3)}`
+                      : '???'}
+                  </span>
+                  <button className="wallet-copy-btn" onClick={() => copyWalletAddress(opponent.wallet || '', 'opponent')} title="Copy wallet address">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                       <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
@@ -238,15 +246,15 @@ export default function GameRoom() {
                   <div className="player-card-wld-row">
                     <div className="wld-badge-item">
                       <span className="wld-badge win">W</span>
-                      <span className="wld-badge-val">11</span>
+                      <span className="wld-badge-val">{opponent.wins}</span>
                     </div>
                     <div className="wld-badge-item">
                       <span className="wld-badge draw">D</span>
-                      <span className="wld-badge-val">14</span>
+                      <span className="wld-badge-val">{opponent.draws}</span>
                     </div>
                     <div className="wld-badge-item">
                       <span className="wld-badge loss">L</span>
-                      <span className="wld-badge-val">20</span>
+                      <span className="wld-badge-val">{opponent.losses}</span>
                     </div>
                   </div>
                 </div>
@@ -433,7 +441,7 @@ export default function GameRoom() {
                     className="message-username"
                     style={{ 
                       color: msg.sender === 'SYSTEM' || msg.sender === 'ARENA BOT' ? 'var(--text-secondary)' : 
-                             msg.sender === 'Hakuna matata' ? 'var(--color-you)' : 'var(--color-opponent)'
+                             msg.sender === username ? 'var(--color-you)' : 'var(--color-opponent)'
                     }}
                   >
                     {msg.sender}:

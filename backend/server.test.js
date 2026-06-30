@@ -1,6 +1,16 @@
 const http = require('http');
 const ioClient = require('socket.io-client');
 
+jest.mock('bcryptjs', () => ({
+  hash: jest.fn().mockResolvedValue('hashed_password'),
+  compare: jest.fn().mockResolvedValue(true)
+}));
+
+jest.mock('jsonwebtoken', () => ({
+  sign: jest.fn().mockReturnValue('test_token'),
+  verify: jest.fn().mockReturnValue({ adminId: 1, username: 'admin' })
+}));
+
 jest.mock('./db', () => {
   const players = {};
   const rooms = {};

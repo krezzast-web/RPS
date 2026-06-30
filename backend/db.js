@@ -46,7 +46,39 @@ async function initDb() {
       likes INT DEFAULT 0,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS matches (
+      id SERIAL PRIMARY KEY,
+      room_id VARCHAR(50),
+      player1_wallet VARCHAR(50),
+      player2_wallet VARCHAR(50),
+      winner_wallet VARCHAR(50),
+      player1_move VARCHAR(1),
+      player2_move VARCHAR(1),
+      stake DECIMAL(10,4),
+      fee DECIMAL(10,4),
+      played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS giveaways (
+      id SERIAL PRIMARY KEY,
+      title VARCHAR(200) NOT NULL,
+      description TEXT,
+      prize_sol DECIMAL(10,4) DEFAULT 0,
+      winner_count INT DEFAULT 1,
+      status VARCHAR(20) DEFAULT 'ACTIVE',
+      end_date TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS admins (
+      id SERIAL PRIMARY KEY,
+      username VARCHAR(50) UNIQUE NOT NULL,
+      password_hash VARCHAR(255) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
   `;
+
   try {
     await pool.query(createTablesQuery);
     console.log('PostgreSQL database schema initialized successfully.');
@@ -55,7 +87,6 @@ async function initDb() {
   }
 }
 
-// Check and verify tables schema on load
 initDb();
 
 module.exports = {
