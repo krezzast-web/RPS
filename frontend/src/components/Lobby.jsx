@@ -31,8 +31,7 @@ export default function Lobby() {
 
   const handleJoinTier = (tier) => {
     if (!walletConnected) { connectWallet(); return; }
-    // Join a public tier room — uses tier ID as room type
-    joinRoom({ id: `tier_${tier.id}_${Date.now()}`, name: tier.title, price: parseFloat(tier.bet_chips), fee: parseFloat(tier.fee_rate), player1Wallet: '' });
+    joinRoom({ id: `tier_${tier.id}_${Date.now()}`, name: tier.title, betSol: parseFloat(tier.bet_sol), feeRate: parseFloat(tier.fee_rate), player1Wallet: '' });
   };
 
   const formatNumber = (n) => {
@@ -134,7 +133,7 @@ export default function Lobby() {
                   <div className="card-stat">
                     <span className="card-stat-label">Bet</span>
                     <span className="card-stat-value" style={{ color: 'var(--accent-color)', fontWeight: 700 }}>
-                      ⬡ {parseFloat(tier.bet_chips).toLocaleString()}
+                      ◎ {parseFloat(tier.bet_sol).toFixed(2)} SOL
                     </span>
                   </div>
                   <div className="card-stat">
@@ -144,7 +143,7 @@ export default function Lobby() {
                   <div className="card-stat">
                     <span className="card-stat-label">Win</span>
                     <span className="card-stat-value" style={{ color: '#4ade80' }}>
-                      ⬡ {Math.round(parseFloat(tier.bet_chips) * 2 * (1 - parseFloat(tier.fee_rate))).toLocaleString()}
+                      ◎ {(parseFloat(tier.bet_sol) * 2 * (1 - parseFloat(tier.fee_rate))).toFixed(4)} SOL
                     </span>
                   </div>
                   <div className="card-stat">
@@ -197,7 +196,7 @@ export default function Lobby() {
                   <div className="custom-room-metrics">
                     <div className="metric-col">
                       <span className="metric-lbl">Bet</span>
-                      <span className="metric-val" style={{ color: 'var(--accent-color)' }}>⬡ {room.price}</span>
+                      <span className="metric-val" style={{ color: 'var(--accent-color)' }}>◎ {parseFloat(room.betSol || 0).toFixed(3)} SOL</span>
                     </div>
                     <div className="metric-col">
                       <span className="metric-lbl">Players</span>
@@ -252,7 +251,7 @@ export default function Lobby() {
                     <span className="leaderboard-username">{player.name}</span>
                     <span className="leaderboard-rps-score">{player.wins}W · {player.draws}D · {player.losses}L · ELO {player.rating}</span>
                   </div>
-                  <span className="leaderboard-earnings">⬡ {parseFloat(player.chips).toLocaleString()}</span>
+                  <span className="leaderboard-earnings">◎ {parseFloat(player.solBalance || 0).toFixed(3)} SOL</span>
                 </div>
               ))
             )}
@@ -332,8 +331,7 @@ export default function Lobby() {
                           <div style={{ fontSize: '10px', color: '#555' }}>{w.title} · {w.date}</div>
                         </div>
                         <div style={{ textAlign: 'right' }}>
-                          <div style={{ color: 'var(--accent-color)', fontWeight: 700, fontFamily: 'Outfit, sans-serif' }}>⬡ {parseFloat(w.chips_won).toLocaleString()}</div>
-                          <div style={{ fontSize: '10px', color: '#555' }}>{parseFloat(w.sol_equivalent).toFixed(4)} SOL</div>
+                          <div style={{ color: 'var(--accent-color)', fontWeight: 700, fontFamily: 'Outfit, sans-serif' }}>◎ {parseFloat(w.sol_won || 0).toFixed(4)} SOL</div>
                         </div>
                       </div>
                     ))

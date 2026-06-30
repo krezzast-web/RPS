@@ -231,6 +231,61 @@ function GiveawayManager({ token }) {
   );
 }
 
+function SweepFees({ token }) {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState('');
+  const handle = async () => {
+    if (!window.confirm('Sweep all collected fees to the business wallet?')) return;
+    setLoading(true); setResult('');
+    try {
+      const res = await fetch('/api/admin/sweep-fees', { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error);
+      setResult(`✓ Swept ${d.sweptSol} SOL → ${d.to.slice(0,8)}...`);
+    } catch(e) { setResult('✗ ' + e.message); }
+    finally { setLoading(false); }
+  };
+  return (
+    <div style={{ marginTop: '24px', background: '#0a0a10', border: '1px solid rgba(20,241,149,0.2)', borderRadius: '12px', padding: '20px' }}>
+      <div style={{ fontWeight: 700, color: '#14f195', marginBottom: '8px', fontSize: '14px' }}>Fee Sweep to Business Wallet</div>
+      <div style={{ fontSize: '12px', color: '#666', marginBottom: '14px' }}>Sends all accumulated platform fees to: <code style={{ color: '#14f195', fontSize: '11px' }}>7o7YrgFHTbxWGezYeue36Lfv6vzXzEsZQVePY4ic66s6</code></div>
+      <button onClick={handle} disabled={loading} style={{ background: 'rgba(20,241,149,0.15)', border: '1px solid rgba(20,241,149,0.4)', color: '#14f195', borderRadius: '8px', padding: '10px 20px', cursor: 'pointer', fontWeight: 700, fontSize: '13px' }}>
+        {loading ? 'Sweeping...' : '◎ Sweep Fees Now'}
+      </button>
+      {result && <div style={{ marginTop: '10px', fontSize: '13px', color: result.startsWith('✓') ? '#14f195' : '#f87171' }}>{result}</div>}
+    </div>
+  );
+}
+
+function CreditSol({ token }) {
+  const [wallet, setWallet] = useState('');
+  const [amount, setAmount] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState('');
+  const handle = async (e) => {
+    e.preventDefault(); setLoading(true); setResult('');
+    try {
+      const res = await fetch('/api/admin/credit-sol', { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ wallet, solAmount: parseFloat(amount), notes: 'Admin manual credit' }) });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error);
+      setResult(`✓ Credited ${amount} SOL to ${wallet.slice(0,8)}...`);
+      setWallet(''); setAmount('');
+    } catch(e) { setResult('✗ ' + e.message); }
+    finally { setLoading(false); }
+  };
+  return (
+    <div style={{ marginTop: '16px', background: '#0a0a10', border: '1px solid rgba(99,102,241,0.2)', borderRadius: '12px', padding: '20px' }}>
+      <div style={{ fontWeight: 700, color: '#6366f1', marginBottom: '12px', fontSize: '14px' }}>Manual SOL Credit (Admin Only)</div>
+      <form onSubmit={handle} style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <input value={wallet} onChange={e => setWallet(e.target.value)} placeholder="Player wallet address" required style={{ flex: 2, background: '#111118', border: '1px solid #2a2a3e', borderRadius: '8px', padding: '8px 12px', color: '#fff', fontSize: '13px', minWidth: '200px' }} />
+        <input value={amount} onChange={e => setAmount(e.target.value)} placeholder="SOL amount" type="number" step="0.001" min="0.001" required style={{ flex: 1, background: '#111118', border: '1px solid #2a2a3e', borderRadius: '8px', padding: '8px 12px', color: '#fff', fontSize: '13px', minWidth: '100px' }} />
+        <button type="submit" disabled={loading} style={{ background: '#6366f1', border: 'none', color: '#fff', borderRadius: '8px', padding: '9px 16px', cursor: 'pointer', fontWeight: 700, fontSize: '13px' }}>{loading ? '...' : 'Credit SOL'}</button>
+      </form>
+      {result && <div style={{ marginTop: '8px', fontSize: '12px', color: result.startsWith('✓') ? '#14f195' : '#f87171' }}>{result}</div>}
+    </div>
+  );
+}
+
 export default function Admin() {
   const [token, setToken] = useState(localStorage.getItem('rps_admin_token') || null);
   const [activeTab, setActiveTab] = useState('overview');
@@ -332,11 +387,13 @@ export default function Admin() {
               <StatCard label="Active Giveaways" value={stats?.active_giveaways} color="#ec4899" />
               <StatCard
                 label="Fees Collected"
-                value={stats?.total_fees_collected ? parseFloat(stats.total_fees_collected).toFixed(4) + ' SOL' : '0 SOL'}
+                value={stats?.fees_collected_sol ? parseFloat(stats.fees_collected_sol).toFixed(6) + ' SOL' : '0 SOL'}
                 color="#14b8a6"
               />
             </div>
-          </div>
+          <SweepFees token={token} />
+          <CreditSol token={token} />
+        </div>
         )}
 
         {/* Players */}
@@ -364,8 +421,8 @@ export default function Admin() {
               { key: 'id', label: 'Room ID' },
               { key: 'name', label: 'Name' },
               { key: 'status', label: 'Status' },
-              { key: 'price', label: 'Bet (SOL)' },
-              { key: 'fee', label: 'Fee' },
+              { key: 'bet_sol', label: 'Bet (SOL)' },
+              { key: 'fee_rate', label: 'Fee Rate' },
               { key: 'player1', label: 'Player 1' },
               { key: 'player2', label: 'Player 2' },
               { key: 'created_at', label: 'Created' }
@@ -385,8 +442,8 @@ export default function Admin() {
               { key: 'player1_move', label: 'P1 Move' },
               { key: 'player2_move', label: 'P2 Move' },
               { key: 'winner', label: 'Winner' },
-              { key: 'stake', label: 'Stake (SOL)' },
-              { key: 'fee', label: 'Fee (SOL)' },
+              { key: 'bet_sol', label: 'Bet (SOL)' },
+              { key: 'fee_sol', label: 'Fee (SOL)' },
               { key: 'played_at', label: 'Played At' }
             ]}
             rows={matches}
