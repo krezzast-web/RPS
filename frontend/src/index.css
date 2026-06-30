@@ -279,6 +279,185 @@ button, input {
   box-shadow: 0 0 15px rgba(212, 255, 0, 0.3);
 }
 
+/* Header Wallet Group */
+.header-wallet-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* CHIPS Balance Display */
+.chips-display {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(212, 255, 0, 0.06);
+  border: 1px solid rgba(212, 255, 0, 0.2);
+  border-radius: 4px;
+  padding: 5px 10px 5px 8px;
+  font-family: var(--font-heading);
+}
+
+.chips-icon {
+  font-size: 14px;
+  color: var(--accent-color);
+  line-height: 1;
+}
+
+.chips-amount {
+  font-weight: 800;
+  font-size: 13px;
+  color: var(--accent-color);
+  font-family: var(--font-heading);
+}
+
+.chips-label {
+  font-size: 10px;
+  color: rgba(212,255,0,0.6);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.btn-chips-add {
+  background: var(--accent-color);
+  color: #000;
+  border: none;
+  border-radius: 3px;
+  width: 18px;
+  height: 18px;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.btn-chips-add:hover {
+  transform: scale(1.15);
+  box-shadow: 0 0 8px rgba(212,255,0,0.4);
+}
+
+/* Wallet Profile Dropdown */
+.wallet-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  padding: 6px 10px 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: border-color 0.2s;
+  position: relative;
+  user-select: none;
+}
+
+.wallet-profile:hover {
+  border-color: var(--text-secondary);
+}
+
+.chevron-icon {
+  color: var(--text-secondary);
+  transition: transform 0.15s;
+}
+
+.wallet-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  min-width: 160px;
+  z-index: 500;
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-radius: 4px;
+  text-align: left;
+  transition: all 0.15s;
+}
+
+.dropdown-item:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.dropdown-item.danger {
+  color: #f87171;
+}
+
+.dropdown-item.danger:hover {
+  background: rgba(248,113,113,0.1);
+}
+
+.dropdown-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 0;
+}
+
+/* Live Pool Badge in Stats */
+.pool-live-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(212,255,0,0.06);
+  border: 1px solid rgba(212,255,0,0.2);
+  border-radius: 20px;
+  padding: 4px 12px;
+  animation: pulse-badge 2s ease-in-out infinite;
+}
+
+@keyframes pulse-badge {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(212,255,0,0.1); }
+  50% { box-shadow: 0 0 0 6px rgba(212,255,0,0); }
+}
+
+.pool-live-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--accent-color);
+  border-radius: 50%;
+  animation: blink 1.4s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.pool-live-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.pool-live-amount {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 13px;
+  color: var(--accent-color);
+}
+
 /* Page Layout: Lobby */
 .lobby-container {
   padding: 20px 24px;
@@ -322,25 +501,57 @@ button, input {
   font-size: 18px;
 }
 
-/* Room Cards Grid */
+/* Room Tiers Section — Full Width */
+.room-tiers-section {
+  width: 100%;
+}
+
+.room-tiers-loading {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* Room Cards Grid — always fill full width */
 .room-tiers-row {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+  width: 100%;
+}
+
+@media (max-width: 1400px) {
+  .room-tiers-row { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 800px) {
+  .room-tiers-row { grid-template-columns: repeat(2, 1fr); }
 }
 
 .room-card {
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 4px;
-  padding: 16px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
   justify-content: space-between;
   transition: all 0.2s ease;
   position: relative;
-  min-height: 230px;
+  min-height: 200px;
+}
+
+.ranked-badge {
+  font-family: var(--font-heading);
+  font-size: 8px;
+  font-weight: 800;
+  color: #000;
+  background: var(--accent-color);
+  padding: 2px 6px;
+  border-radius: 2px;
+  letter-spacing: 1px;
 }
 
 .room-card:hover {

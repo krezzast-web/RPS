@@ -22,13 +22,13 @@ jest.mock('./db', () => {
         const wallet = params[0];
         const username = params[1];
         if (!players[wallet]) {
-          players[wallet] = { wallet_address: wallet, username, rating: 1000, wins: 0, losses: 0, draws: 0, sol_balance: 47.0 };
+          players[wallet] = { wallet_address: wallet, username, rating: 1000, wins: 0, losses: 0, draws: 0, chips_balance: 0 };
         }
         return Promise.resolve({ rows: [] });
       }
       if (text.includes('FROM players WHERE wallet_address')) {
         const wallet = params[0];
-        const p = players[wallet] || { wallet_address: wallet, username: `Player_${wallet.substring(0, 4)}`, rating: 1000, wins: 0, losses: 0, draws: 0, sol_balance: 47.0 };
+        const p = players[wallet] || { wallet_address: wallet, username: `Player_${wallet.substring(0, 4)}`, rating: 1000, wins: 0, losses: 0, draws: 0, chips_balance: 0 };
         return Promise.resolve({ rows: [p] });
       }
       if (text.includes('INSERT INTO rooms')) {
@@ -75,14 +75,25 @@ jest.mock('./db', () => {
       if (text.includes('SELECT sender_username as sender')) {
         return Promise.resolve({ rows: messages.slice(-10) });
       }
-      if (text.includes('SELECT COUNT(*)')) {
-        return Promise.resolve({ rows: [{ wallets_count: Object.keys(players).length, rooms_count: Object.keys(rooms).length }] });
+      if (text.includes('SELECT COUNT(*)') || text.includes('wallets_count')) {
+        return Promise.resolve({ rows: [{ wallets_count: Object.keys(players).length, rooms_count: Object.keys(rooms).length, matches_count: 0, giveaways_count: 0 }] });
       }
-      if (text.includes('SELECT username, rating')) {
-        return Promise.resolve({ rows: Object.values(players).map(p => ({ username: p.username, rating: p.rating })) });
+      if (text.includes('SELECT username, rating') || text.includes('chips_balance DESC')) {
+        return Promise.resolve({ rows: Object.values(players).map(p => ({ username: p.username, rating: p.rating, chips_balance: 0, wins: 0, losses: 0, draws: 0, wallet_address: p.wallet_address })) });
       }
       if (text.includes('SELECT r.id, r.name')) {
         return Promise.resolve({ rows: Object.values(rooms).map(r => ({ id: r.id, name: r.name, price: r.price, fee: r.fee, status: r.status, players: r.player2_wallet ? 2 : 1 })) });
+      }
+      if (text.includes('FROM room_tiers')) {
+        return Promise.resolve({ rows: [
+          { id: 'ranked', title: 'Ranked Room', tier_type: 'ranked', bet_chips: 500, fee_rate: 0.02, is_ranked: true, display_order: 0 }
+        ]});
+      }
+      if (text.includes('FROM giveaways')) {
+        return Promise.resolve({ rows: [] });
+      }
+      if (text.includes('platform_config')) {
+        return Promise.resolve({ rows: [{ key: 'chips_per_sol', value: '1000' }, { key: 'giveaway_pool_chips', value: '0' }] });
       }
       return Promise.resolve({ rows: [] });
     }),
@@ -128,7 +139,8 @@ describe('RPS WebSocket Server Integration Tests', () => {
     client1.on('profile_sync', (profile) => {
       expect(profile).toHaveProperty('username');
       expect(profile.rating).toBe(1000);
-      expect(profile.solBalance).toBe(47.0);
+      expect(profile).toHaveProperty('chipsBalance');
+      expect(profile.chipsBalance).toBeGreaterThanOrEqual(0);
       done();
     });
   });

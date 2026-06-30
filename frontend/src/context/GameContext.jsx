@@ -9,7 +9,7 @@ export const GameProvider = ({ children }) => {
   // Wallet & Player Profile
   const [walletConnected, setWalletConnected] = useState(false);
   const [walletAddress, setWalletAddress] = useState('');
-  const [solBalance, setSolBalance] = useState(null); // null until server confirms
+  const [chipsBalance, setChipsBalance] = useState(0);
   const [rpsRating, setRpsRating] = useState(1000);
   const [username, setUsername] = useState('Player');
   const [playerWins, setPlayerWins] = useState(0);
@@ -27,7 +27,8 @@ export const GameProvider = ({ children }) => {
   // Lobby Real Data
   const [topRanks, setTopRanks] = useState([]);
   const [giveaways, setGiveaways] = useState([]);
-  const [lobbyStats, setLobbyStats] = useState({ wallets: 0, rooms: 0, matches: 0, giveaways: 0 });
+  const [roomTiers, setRoomTiers] = useState([]);
+  const [lobbyStats, setLobbyStats] = useState({ wallets: 0, rooms: 0, matches: 0, giveaways: 0, poolChips: 0, poolSol: '0' });
 
   // Matchmaking State Machine
   const [matchmakingState, setMatchmakingState] = useState('waiting_for_opponent');
@@ -80,7 +81,7 @@ export const GameProvider = ({ children }) => {
     socket.on('profile_sync', (profile) => {
       setUsername(profile.username);
       setRpsRating(profile.rating);
-      setSolBalance(profile.solBalance);
+      setChipsBalance(profile.chipsBalance || 0);
       setPlayerWins(profile.wins || 0);
       setPlayerLosses(profile.losses || 0);
       setPlayerDraws(profile.draws || 0);
@@ -90,7 +91,8 @@ export const GameProvider = ({ children }) => {
     socket.on('lobby_update', (lobbyData) => {
       setCustomRooms(lobbyData.customRooms || []);
       setTopRanks(lobbyData.topRanks || []);
-      setLobbyStats(lobbyData.stats || { wallets: 0, rooms: 0, matches: 0, giveaways: 0 });
+      setRoomTiers(lobbyData.roomTiers || []);
+      setLobbyStats(lobbyData.stats || { wallets: 0, rooms: 0, matches: 0, giveaways: 0, poolChips: 0, poolSol: '0' });
       setGiveaways(lobbyData.giveaways || []);
       if (lobbyData.chatMessages) {
         setChatMessages(lobbyData.chatMessages.map((m, i) => ({ ...m, id: m.id || i, tab: 'general' })));
@@ -211,16 +213,16 @@ export const GameProvider = ({ children }) => {
       const oppProfile = isP1 ? profiles.player2 : profiles.player1;
 
       setRpsRating(myProfile.rating);
-      setSolBalance(myProfile.solBalance);
+      setChipsBalance(myProfile.chipsBalance || 0);
       setPlayerWins(myProfile.wins || 0);
       setPlayerLosses(myProfile.losses || 0);
       setPlayerDraws(myProfile.draws || 0);
 
-      // Update opponent stats live
       if (oppProfile) {
         setOpponent(prev => prev ? {
           ...prev,
           rating: oppProfile.rating,
+          chipsBalance: oppProfile.chipsBalance || 0,
           wins: oppProfile.wins || 0,
           losses: oppProfile.losses || 0,
           draws: oppProfile.draws || 0
@@ -274,7 +276,7 @@ export const GameProvider = ({ children }) => {
     }
     setWalletConnected(false);
     setWalletAddress('');
-    setSolBalance(null);
+    setChipsBalance(0);
     setActiveView('lobby');
     setActiveRoom(null);
     walletRef.current = '';
@@ -335,11 +337,11 @@ export const GameProvider = ({ children }) => {
 
   return (
     <GameContext.Provider value={{
-      walletConnected, walletAddress, solBalance, rpsRating, username,
+      walletConnected, walletAddress, chipsBalance, rpsRating, username,
       playerWins, playerLosses, playerDraws,
       activeView, activeRoom,
       customRooms, createRoomModalOpen, setCreateRoomModalOpen, createCustomRoom,
-      topRanks, giveaways, lobbyStats,
+      topRanks, giveaways, lobbyStats, roomTiers,
       matchmakingState, userReady, opponentReady, opponent,
       roundNum, playerScore, opponentScore,
       playerSelection, opponentSelection, userLockedSelection, battleResult,
