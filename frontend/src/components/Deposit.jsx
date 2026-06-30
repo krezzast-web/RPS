@@ -2,42 +2,62 @@ import React, { useState, useEffect } from 'react';
 import { useGame } from '../context/GameContext';
 
 export default function Deposit({ onClose }) {
-  const { walletAddress, chipsBalance } = useGame();
-  const [tiers, setTiers] = useState([]);
-  const [selected, setSelected] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [step, setStep] = useState('select'); // 'select' | 'instructions' | 'withdraw'
+  const { walletAddress, solBalance, custodialWallet } = useGame();
+  const [tab, setTab] = useState('deposit'); // 'deposit' | 'withdraw'
+  const [copied, setCopied] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState('');
-  const [withdrawResult, setWithdrawResult] = useState(null);
   const [withdrawLoading, setWithdrawLoading] = useState(false);
-  const [platformWallet, setPlatformWallet] = useState('');
+  const [withdrawResult, setWithdrawResult] = useState(null);
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [currentBalance, setCurrentBalance] = useState(parseFloat(solBalance || 0));
 
+  // Keep balance in sync with context
   useEffect(() => {
-    fetch('/api/config/deposit-tiers')
-      .then(r => r.json())
-      .then(d => {
-        setTiers(d.tiers || []);
-        setPlatformWallet(d.platformWallet || '7o7YrgFHTbxWGezYeue36Lfv6vzXzEsZQVePY4ic66s6');
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
+    setCurrentBalance(parseFloat(solBalance || 0));
+  }, [solBalance]);
+
+  const handleCopy = () => {
+    if (!custodialWallet) return;
+    navigator.clipboard.writeText(custodialWallet);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  // Pull on-chain balance
+  const handleSyncBalance = async () => {
+    if (!walletAddress || syncLoading) return;
+    setSyncLoading(true);
+    try {
+      const res = await fetch('/api/wallet/sync-balance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet: walletAddress })
+      });
+      const data = await res.json();
+      if (res.ok) setCurrentBalance(parseFloat(data.solBalance || 0));
+    } catch (err) {
+      console.error('Sync failed', err);
+    } finally {
+      setSyncLoading(false);
+    }
+  };
 
   const handleWithdraw = async (e) => {
     e.preventDefault();
-    const chips = parseFloat(withdrawAmount);
-    if (!chips || chips < 100) return;
+    const amount = parseFloat(withdrawAmount);
+    if (!amount || amount < 0.001) return;
     setWithdrawLoading(true);
     setWithdrawResult(null);
     try {
-      const res = await fetch('/api/withdraw/request', {
+      const res = await fetch('/api/withdraw', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet: walletAddress, chipsAmount: chips })
+        body: JSON.stringify({ wallet: walletAddress, solAmount: amount })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setWithdrawResult({ success: true, ...data });
+      setCurrentBalance(prev => Math.max(0, prev - amount));
     } catch (err) {
       setWithdrawResult({ success: false, error: err.message });
     } finally {
@@ -45,189 +65,189 @@ export default function Deposit({ onClose }) {
     }
   };
 
+  const withdrawFeeRate = 0.01;
+  const netWithdraw = parseFloat(withdrawAmount || 0) * (1 - withdrawFeeRate);
+
   return (
     <div className="deposit-overlay" onClick={onClose}>
-      <div className="deposit-modal" onClick={e => e.stopPropagation()}>
-        
+      <div className="deposit-modal sol-modal" onClick={e => e.stopPropagation()}>
+
         {/* Header */}
         <div className="deposit-header">
           <div className="deposit-title-group">
-            <span className="deposit-title-icon">⬡</span>
-            <span className="deposit-title">CHIPS Exchange</span>
+            <span className="deposit-title-icon">◎</span>
+            <span className="deposit-title">SOL Game Wallet</span>
           </div>
           <button className="deposit-close-btn" onClick={onClose}>×</button>
         </div>
 
+        {/* Balance Bar */}
+        <div className="sol-balance-bar">
+          <div className="sol-balance-info">
+            <span className="sol-balance-label">Game Balance</span>
+            <span className="sol-balance-value">◎ {currentBalance.toFixed(4)} SOL</span>
+          </div>
+          <button
+            className={`btn-sync-balance ${syncLoading ? 'loading' : ''}`}
+            onClick={handleSyncBalance}
+            disabled={syncLoading}
+            title="Refresh balance from blockchain"
+          >
+            {syncLoading ? '⟳' : '⟳ Sync'}
+          </button>
+        </div>
+
         {/* Tabs */}
         <div className="deposit-tabs">
-          <button 
-            className={`deposit-tab ${step !== 'withdraw' ? 'active' : ''}`} 
-            onClick={() => setStep('select')}
+          <button
+            className={`deposit-tab ${tab === 'deposit' ? 'active' : ''}`}
+            onClick={() => setTab('deposit')}
           >
-            Buy CHIPS (Deposit)
+            Deposit SOL
           </button>
-          <button 
-            className={`deposit-tab ${step === 'withdraw' ? 'active' : ''}`} 
-            onClick={() => setStep('withdraw')}
+          <button
+            className={`deposit-tab ${tab === 'withdraw' ? 'active' : ''}`}
+            onClick={() => setTab('withdraw')}
           >
-            Cash Out (Withdraw)
+            Withdraw SOL
           </button>
         </div>
 
         {/* Body */}
         <div className="deposit-body">
-          {step !== 'withdraw' && (
-            <>
-              {step === 'select' && (
+
+          {/* DEPOSIT TAB */}
+          {tab === 'deposit' && (
+            <div className="sol-deposit-section animate-slide-down">
+              <div className="sol-explainer">
+                <p>Send SOL from your Phantom or Solflare wallet to your personal game wallet address below. Your balance updates automatically once the transaction confirms on-chain (~5 seconds).</p>
+              </div>
+
+              {custodialWallet ? (
                 <>
-                  <div className="deposit-intro">
-                    <p>Select a CHIPS bundle to purchase.</p>
-                    <span className="exchange-rate-tag">Rate: 1 SOL = 1,000 CHIPS</span>
-                  </div>
-
-                  {loading ? (
-                    <div className="deposit-loading">Loading bundles…</div>
-                  ) : (
-                    <div className="riot-grid">
-                      {tiers.map((tier, i) => (
-                        <div 
-                          key={i} 
-                          className={`riot-card ${selected?.sol === tier.sol ? 'selected' : ''}`}
-                          onClick={() => setSelected(tier)}
-                        >
-                          <div className="riot-card-chips">
-                            <span className="riot-chips-icon">⬡</span>
-                            <span className="riot-chips-amount">{tier.totalChips.toLocaleString()}</span>
-                          </div>
-                          <div className="riot-card-label">CHIPS</div>
-                          <div className="riot-card-price">{tier.sol} SOL</div>
-                          <div className="riot-card-fee">Includes {tier.feeChips} CHIPS fee</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {selected && (
-                    <button className="btn-deposit-proceed" onClick={() => setStep('instructions')}>
-                      Purchase Bundle for {selected.sol} SOL
-                    </button>
-                  )}
-                </>
-              )}
-
-              {step === 'instructions' && selected && (
-                <div className="deposit-instructions animate-slide-down">
-                  <div className="instruction-step-header">
-                    <span className="step-number">1</span>
-                    <p>Send exactly <strong style={{ color: 'var(--accent-color)' }}>{selected.sol} SOL</strong> to the platform wallet address below:</p>
-                  </div>
-
-                  <div className="platform-wallet-box">
-                    <div className="wallet-box-header">
-                      <span>SOLANA RECEIVING ADDRESS</span>
+                  <div className="sol-wallet-card">
+                    <div className="sol-wallet-card-header">
+                      <span>YOUR GAME WALLET ADDRESS</span>
                       <span className="network-pill">SOLANA MAINNET</span>
                     </div>
-                    <div className="wallet-address-display">{platformWallet}</div>
-                    <button 
-                      className="btn-copy-address"
-                      onClick={() => {
-                        navigator.clipboard.writeText(platformWallet);
-                        alert("Address copied to clipboard!");
-                      }}
+                    <div className="sol-wallet-address">{custodialWallet}</div>
+                    <button
+                      className={`btn-copy-sol ${copied ? 'copied' : ''}`}
+                      onClick={handleCopy}
                     >
-                      Copy Address
+                      {copied ? '✓ Copied!' : 'Copy Address'}
                     </button>
                   </div>
 
-                  <div className="instruction-notes">
-                    <div className="note-item">
-                      <span className="note-bullet">⚠</span>
-                      <span>Send from your connected wallet only: <strong>{walletAddress.slice(0, 8)}…{walletAddress.slice(-8)}</strong></span>
+                  <div className="sol-steps">
+                    <div className="sol-step">
+                      <span className="sol-step-num">1</span>
+                      <span>Open Phantom or Solflare wallet</span>
                     </div>
-                    <div className="note-item">
-                      <span className="note-bullet">⚠</span>
-                      <span>Transactions take approximately 20 seconds to confirm on the Solana network.</span>
+                    <div className="sol-step">
+                      <span className="sol-step-num">2</span>
+                      <span>Send SOL to the address above</span>
                     </div>
-                    <div className="note-item">
-                      <span className="note-bullet">✓</span>
-                      <span>Your account will be credited with <strong>{selected.totalChips.toLocaleString()} CHIPS</strong> automatically once confirmed.</span>
+                    <div className="sol-step">
+                      <span className="sol-step-num">3</span>
+                      <span>Click <strong>Sync</strong> to refresh your balance after ~5 seconds</span>
                     </div>
                   </div>
 
-                  <div className="instruction-actions">
-                    <button className="btn-instruction-back" onClick={() => setStep('select')}>
-                      ← Back to Bundles
-                    </button>
+                  <div className="sol-warning-box">
+                    <span>⚠</span>
+                    <span>Send <strong>SOL only</strong> on the <strong>Solana mainnet</strong>. Sending from the wrong network will result in permanent loss of funds.</span>
                   </div>
+                </>
+              ) : (
+                <div className="sol-wallet-loading">
+                  <div className="deposit-loading">Generating your game wallet…</div>
                 </div>
               )}
-            </>
+            </div>
           )}
 
-          {/* Withdraw Tab */}
-          {step === 'withdraw' && (
-            <div className="withdraw-section">
+          {/* WITHDRAW TAB */}
+          {tab === 'withdraw' && (
+            <div className="withdraw-section animate-slide-down">
               <div className="withdraw-info-card">
                 <div className="withdraw-info-row">
-                  <span>Exchange Rate</span>
-                  <strong>1,000 CHIPS = 1 SOL</strong>
+                  <span>Network</span>
+                  <strong>Solana Mainnet</strong>
                 </div>
                 <div className="withdraw-info-row">
                   <span>Processing Fee</span>
-                  <strong style={{ color: '#f87171' }}>5%</strong>
+                  <strong style={{ color: '#f87171' }}>1%</strong>
                 </div>
                 <div className="withdraw-info-row">
-                  <span>Your Balance</span>
-                  <strong style={{ color: 'var(--accent-color)' }}>⬡ {parseFloat(chipsBalance || 0).toLocaleString()} CHIPS</strong>
+                  <span>Minimum Withdrawal</span>
+                  <strong>0.001 SOL</strong>
+                </div>
+                <div className="withdraw-info-row">
+                  <span>Destination</span>
+                  <strong style={{ fontSize: '0.78rem' }}>{walletAddress ? `${walletAddress.slice(0, 8)}…${walletAddress.slice(-8)}` : '—'}</strong>
+                </div>
+                <div className="withdraw-info-row">
+                  <span>Game Balance</span>
+                  <strong style={{ color: 'var(--accent-color)' }}>◎ {currentBalance.toFixed(4)} SOL</strong>
                 </div>
               </div>
 
               <form onSubmit={handleWithdraw} className="withdraw-form">
                 <div className="withdraw-input-group">
-                  <label className="withdraw-input-label">Amount to Cash Out (CHIPS)</label>
+                  <label className="withdraw-input-label">Amount to Withdraw (SOL)</label>
                   <div className="withdraw-input-wrapper">
-                    <input 
+                    <input
                       type="number"
-                      min="100"
-                      step="1"
-                      placeholder="Minimum 100 CHIPS"
+                      min="0.001"
+                      step="0.001"
+                      placeholder="e.g. 0.5"
                       className="withdraw-input"
                       value={withdrawAmount}
                       onChange={e => setWithdrawAmount(e.target.value)}
                     />
-                    <button 
-                      type="button" 
+                    <button
+                      type="button"
                       className="btn-withdraw-max"
-                      onClick={() => setWithdrawAmount(Math.floor(parseFloat(chipsBalance || 0)).toString())}
+                      onClick={() => setWithdrawAmount(currentBalance.toFixed(4))}
                     >
                       MAX
                     </button>
                   </div>
                 </div>
 
-                {withdrawAmount >= 100 && (
+                {parseFloat(withdrawAmount) >= 0.001 && (
                   <div className="withdraw-preview-card animate-slide-down">
                     <div className="preview-row">
-                      <span>Subtotal:</span>
-                      <span>{parseFloat(withdrawAmount).toLocaleString()} CHIPS</span>
+                      <span>You send:</span>
+                      <span>◎ {parseFloat(withdrawAmount).toFixed(4)} SOL</span>
                     </div>
                     <div className="preview-row">
-                      <span>Fee (5%):</span>
-                      <span style={{ color: '#f87171' }}>-{Math.round(withdrawAmount * 0.05).toLocaleString()} CHIPS</span>
+                      <span>Fee (1%):</span>
+                      <span style={{ color: '#f87171' }}>-◎ {(parseFloat(withdrawAmount) * withdrawFeeRate).toFixed(6)} SOL</span>
                     </div>
                     <div className="preview-row total">
-                      <span>You Receive:</span>
-                      <span style={{ color: 'var(--accent-color)' }}>{((withdrawAmount * 0.95) / 1000).toFixed(4)} SOL</span>
+                      <span>You receive:</span>
+                      <span style={{ color: 'var(--accent-color)' }}>◎ {netWithdraw.toFixed(6)} SOL</span>
+                    </div>
+                    <div className="preview-row" style={{ fontSize: '0.75rem', color: 'var(--muted-color)' }}>
+                      <span>Destination:</span>
+                      <span>{walletAddress ? `${walletAddress.slice(0, 8)}…${walletAddress.slice(-8)}` : '—'}</span>
                     </div>
                   </div>
                 )}
 
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   className={`btn-withdraw-submit ${withdrawLoading ? 'loading' : ''}`}
-                  disabled={withdrawLoading || !withdrawAmount || withdrawAmount < 100 || withdrawAmount > parseFloat(chipsBalance || 0)}
+                  disabled={
+                    withdrawLoading ||
+                    !withdrawAmount ||
+                    parseFloat(withdrawAmount) < 0.001 ||
+                    parseFloat(withdrawAmount) > currentBalance
+                  }
                 >
-                  {withdrawLoading ? 'Processing Request…' : 'Submit Cash Out Request'}
+                  {withdrawLoading ? 'Processing…' : 'Withdraw to My Wallet'}
                 </button>
               </form>
 
@@ -236,7 +256,19 @@ export default function Deposit({ onClose }) {
                   {withdrawResult.success ? (
                     <div className="alert-content">
                       <span className="alert-icon">✓</span>
-                      <p>Request submitted! You will receive <strong>{withdrawResult.solAmount} SOL</strong> within 24 hours.</p>
+                      <div>
+                        <p>Withdrawal successful! <strong>◎ {withdrawResult.solAmount} SOL</strong> sent to your wallet.</p>
+                        {withdrawResult.signature && (
+                          <a
+                            href={`https://solscan.io/tx/${withdrawResult.signature}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ color: 'var(--accent-color)', fontSize: '0.8rem' }}
+                          >
+                            View on Solscan ↗
+                          </a>
+                        )}
+                      </div>
                     </div>
                   ) : (
                     <div className="alert-content">

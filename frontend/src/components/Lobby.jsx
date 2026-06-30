@@ -276,10 +276,7 @@ export default function Lobby() {
             <div className="giveaway-pool">
               <span className="pool-label">Prize Pool</span>
               <span className="pool-amount">
-                {parseFloat(lobbyStats.poolSol || 0).toFixed(3)} SOL
-              </span>
-              <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                ≈ ⬡ {parseFloat(lobbyStats.poolChips || 0).toFixed(0)} CHIPS
+                {parseFloat(lobbyStats.poolSol || 0).toFixed(4)} SOL
               </span>
             </div>
             <div className="giveaway-winner-info">
@@ -303,11 +300,8 @@ export default function Lobby() {
                       {gw.title}
                     </span>
                     <span className="giveaway-meta">
-                      ⬡ {parseFloat(gw.prize_chips).toLocaleString()} CHIPS · {gw.winner_count} winner{gw.winner_count > 1 ? 's' : ''}
+                      ◎ {parseFloat(gw.prize_sol || 0).toFixed(4)} SOL · {gw.winner_count} winner{gw.winner_count > 1 ? 's' : ''}
                       {gw.end_date_formatted && ` · Ends ${gw.end_date_formatted}`}
-                    </span>
-                    <span style={{ fontSize: '10px', color: 'var(--accent-color)' }}>
-                      ≈ {gw.sol_equiv} SOL
                     </span>
                   </div>
                 </div>

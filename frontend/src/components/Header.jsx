@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useGame } from '../context/GameContext';
 
 export default function Header({ onOpenDeposit, onOpenWithdraw, onOpenProfile }) {
-  const { walletConnected, walletAddress, chipsBalance, username, connectWallet, disconnectWallet } = useGame();
+  const { walletConnected, walletAddress, solBalance, username, connectWallet, disconnectWallet } = useGame();
   const [showMenu, setShowMenu] = useState(false);
 
   // Close menu on outside click
@@ -30,16 +30,16 @@ export default function Header({ onOpenDeposit, onOpenWithdraw, onOpenProfile })
       <div className="header-right">
         {walletConnected ? (
           <div className="header-wallet-group">
-            {/* CHIPS Balance with + button */}
+            {/* SOL Balance with + button */}
             <div className="chips-display">
-              <span className="chips-icon">⬡</span>
-              <span className="chips-amount">{parseFloat(chipsBalance || 0).toLocaleString()}</span>
-              <span className="chips-label">CHIPS</span>
+              <span className="chips-icon">◎</span>
+              <span className="chips-amount">{parseFloat(solBalance || 0).toFixed(4)}</span>
+              <span className="chips-label">SOL</span>
               <button
                 className="btn-chips-add"
                 id="deposit-btn"
                 onClick={(e) => { e.stopPropagation(); onOpenDeposit?.(); }}
-                title="Buy CHIPS"
+                title="Deposit SOL"
               >
                 +
               </button>
@@ -74,11 +74,11 @@ export default function Header({ onOpenDeposit, onOpenWithdraw, onOpenProfile })
                   </button>
                   <button className="dropdown-item" onClick={() => { setShowMenu(false); onOpenDeposit?.(); }}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="17 12 12 7 7 12"/><line x1="12" y1="7" x2="12" y2="20"/><line x1="3" y1="3" x2="21" y2="3"/></svg>
-                    Deposit CHIPS
+                    Deposit SOL
                   </button>
-                  <button className="dropdown-item" onClick={() => { setShowMenu(false); onOpenWithdraw?.(); }}>
+                  <button className="dropdown-item" onClick={() => { setShowMenu(false); onOpenDeposit?.(); }}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="7 12 12 17 17 12"/><line x1="12" y1="17" x2="12" y2="3"/><line x1="3" y1="21" x2="21" y2="21"/></svg>
-                    Withdraw
+                    Withdraw SOL
                   </button>
                   <div className="dropdown-divider" />
                   <button className="dropdown-item danger" onClick={() => { setShowMenu(false); disconnectWallet(); }}>

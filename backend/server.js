@@ -2,14 +2,17 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const http = require('http');
+const crypto = require('crypto');
 const { Server } = require('socket.io');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { Keypair, Connection, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL, sendAndConfirmTransaction } = require('@solana/web3.js');
 const db = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'rps_admin_jwt_secret_2024';
+const ENCRYPTION_KEY = process.env.WALLET_ENCRYPTION_KEY || 'rps_wallet_key_32bytes_padded!!!'; // Must be 32 chars in prod
 
 app.use(cors());
 app.use(express.json());
@@ -20,6 +23,76 @@ const io = new Server(server, {
 });
 
 const activeGames = new Map();
+
+// ─────────────────────────────────────────────
+// Encryption helpers for custodial private keys
+// ─────────────────────────────────────────────
+
+function encryptSecret(plaintext) {
+  const key = Buffer.from(ENCRYPTION_KEY.padEnd(32).slice(0, 32));
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  return iv.toString('hex') + ':' + encrypted.toString('hex');
+}
+
+function decryptSecret(ciphertext) {
+  const [ivHex, encHex] = ciphertext.split(':');
+  const key = Buffer.from(ENCRYPTION_KEY.padEnd(32).slice(0, 32));
+  const iv = Buffer.from(ivHex, 'hex');
+  const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+  const decrypted = Buffer.concat([decipher.update(Buffer.from(encHex, 'hex')), decipher.final()]);
+  return decrypted.toString('utf8');
+}
+
+// ─────────────────────────────────────────────
+// Solana helpers
+// ─────────────────────────────────────────────
+
+function getSolanaConnection(rpcUrl) {
+  return new Connection(rpcUrl || 'https://api.mainnet-beta.solana.com', 'confirmed');
+}
+
+async function getSolBalance(address, rpcUrl) {
+  try {
+    const connection = getSolanaConnection(rpcUrl);
+    const pubkey = new PublicKey(address);
+    const lamports = await connection.getBalance(pubkey);
+    return lamports / LAMPORTS_PER_SOL;
+  } catch (err) {
+    console.error('getSolBalance error:', err.message);
+    return 0;
+  }
+}
+
+async function generateCustodialWallet() {
+  const keypair = Keypair.generate();
+  const address = keypair.publicKey.toString();
+  const secretBase64 = Buffer.from(keypair.secretKey).toString('base64');
+  return { address, secret: encryptSecret(secretBase64) };
+}
+
+async function loadKeypairFromDb(encryptedSecret) {
+  const secretBase64 = decryptSecret(encryptedSecret);
+  const secretKey = Uint8Array.from(Buffer.from(secretBase64, 'base64'));
+  return Keypair.fromSecretKey(secretKey);
+}
+
+// Send SOL on-chain from a custodial wallet to a destination address
+async function sendSolOnChain(encryptedSecret, toAddress, solAmount, rpcUrl) {
+  const keypair = await loadKeypairFromDb(encryptedSecret);
+  const connection = getSolanaConnection(rpcUrl);
+  const lamports = Math.floor(solAmount * LAMPORTS_PER_SOL);
+  const tx = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: keypair.publicKey,
+      toPubkey: new PublicKey(toAddress),
+      lamports,
+    })
+  );
+  const signature = await sendAndConfirmTransaction(connection, tx, [keypair]);
+  return signature;
+}
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -57,9 +130,9 @@ async function getConfig() {
 
 async function broadcastLobbyState() {
   try {
-    const [roomsRes, leaderRes, statsRes, generalMsgRes, giveawaysRes, tiersRes, configRes] = await Promise.all([
+    const [roomsRes, leaderRes, statsRes, generalMsgRes, giveawaysRes, tiersRes] = await Promise.all([
       db.query(`
-        SELECT r.id, r.name, r.price, r.fee, r.status,
+        SELECT r.id, r.name, r.bet_sol, r.fee_rate, r.status,
                (CASE WHEN r.player2_wallet IS NOT NULL THEN 2 ELSE 1 END) as players,
                p1.username as player1_name, p2.username as player2_name
         FROM rooms r
@@ -68,7 +141,7 @@ async function broadcastLobbyState() {
         WHERE r.status = 'OPEN' OR r.status = 'PLAYING'
       `),
       db.query(`
-        SELECT username, rating, wins, losses, draws, chips_balance, wallet_address
+        SELECT username, rating, wins, losses, draws, sol_balance, wallet_address
         FROM players ORDER BY rating DESC, wins DESC LIMIT 10
       `),
       db.query(`
@@ -77,25 +150,22 @@ async function broadcastLobbyState() {
           (SELECT COUNT(*) FROM rooms WHERE status = 'OPEN' OR status = 'PLAYING') as rooms_count,
           (SELECT COUNT(*) FROM matches) as matches_count,
           (SELECT COUNT(*) FROM giveaways WHERE status = 'ACTIVE') as giveaways_count,
-          (SELECT COALESCE(value,'0') FROM platform_config WHERE key = 'giveaway_pool_chips') as pool_chips,
-          (SELECT COALESCE(value,'1000') FROM platform_config WHERE key = 'chips_per_sol') as chips_per_sol
+          (SELECT COALESCE(value,'0') FROM platform_config WHERE key = 'giveaway_pool_sol') as pool_sol,
+          (SELECT COALESCE(value,'0') FROM platform_config WHERE key = 'platform_fees_collected_sol') as fees_collected_sol
       `),
       db.query(`
         SELECT sender_username as sender, text, likes, to_char(created_at, 'HH24:MI') as time
         FROM messages WHERE room_id IS NULL ORDER BY created_at ASC LIMIT 20
       `),
       db.query(`
-        SELECT g.id, g.title, g.description, g.prize_chips, g.winner_count, g.status,
-               to_char(g.end_date, 'DD.MM.YYYY') as end_date_formatted, g.end_date,
-               (SELECT COALESCE(value,'1000') FROM platform_config WHERE key='chips_per_sol') as chips_per_sol
+        SELECT g.id, g.title, g.description, g.prize_sol, g.winner_count, g.status,
+               to_char(g.end_date, 'DD.MM.YYYY') as end_date_formatted, g.end_date
         FROM giveaways g WHERE g.status = 'ACTIVE' ORDER BY g.created_at DESC LIMIT 10
       `),
-      db.query(`SELECT * FROM room_tiers WHERE is_active = TRUE ORDER BY display_order ASC`),
-      db.query(`SELECT key, value FROM platform_config`)
+      db.query(`SELECT * FROM room_tiers WHERE is_active = TRUE ORDER BY display_order ASC`)
     ]);
 
     const s = statsRes.rows[0];
-    const chipsPerSol = parseFloat(s.chips_per_sol || 1000);
 
     const lobbyData = {
       customRooms: roomsRes.rows.map(r => ({
@@ -103,8 +173,8 @@ async function broadcastLobbyState() {
         name: r.name,
         status: r.status,
         players: r.players,
-        price: parseFloat(r.price),
-        fee: parseFloat(r.fee),
+        betSol: parseFloat(r.bet_sol),
+        feeRate: parseFloat(r.fee_rate),
         player1: r.player1_name,
         player2: r.player2_name
       })),
@@ -116,21 +186,17 @@ async function broadcastLobbyState() {
         wins: p.wins,
         losses: p.losses,
         draws: p.draws,
-        chips: parseFloat(p.chips_balance).toFixed(0),
-        solEquiv: (parseFloat(p.chips_balance) / chipsPerSol).toFixed(3)
+        solBalance: parseFloat(p.sol_balance || 0).toFixed(4)
       })),
       stats: {
         wallets: parseInt(s.wallets_count || 0),
         rooms: parseInt(s.rooms_count || 0),
         matches: parseInt(s.matches_count || 0),
         giveaways: parseInt(s.giveaways_count || 0),
-        poolChips: parseFloat(s.pool_chips || 0),
-        poolSol: (parseFloat(s.pool_chips || 0) / chipsPerSol).toFixed(4)
+        poolSol: parseFloat(s.pool_sol || 0).toFixed(4),
+        feesCollectedSol: parseFloat(s.fees_collected_sol || 0).toFixed(4)
       },
-      giveaways: giveawaysRes.rows.map(g => ({
-        ...g,
-        sol_equiv: (parseFloat(g.prize_chips || 0) / parseFloat(g.chips_per_sol || 1000)).toFixed(4)
-      })),
+      giveaways: giveawaysRes.rows,
       roomTiers: tiersRes.rows,
       chatMessages: generalMsgRes.rows
     };
@@ -159,22 +225,36 @@ io.on('connection', (socket) => {
 
     const defaultUsername = `Player_${wallet.substring(0, 6)}`;
     try {
+      // Create player if not exists (no SOL balance — they must deposit)
       await db.query(
-        `INSERT INTO players (wallet_address, username, rating, chips_balance)
+        `INSERT INTO players (wallet_address, username, rating, sol_balance)
          VALUES ($1, $2, 1000, 0)
          ON CONFLICT (wallet_address) DO UPDATE SET last_active = NOW()`,
         [wallet, defaultUsername]
       );
 
+      // Generate custodial wallet if none exists
       const playerRes = await db.query(
-        'SELECT username, rating, chips_balance, wins, losses, draws FROM players WHERE wallet_address = $1',
+        'SELECT username, rating, sol_balance, wins, losses, draws, custodial_wallet_address, custodial_wallet_secret FROM players WHERE wallet_address = $1',
         [wallet]
       );
       const p = playerRes.rows[0];
+
+      let custodialAddress = p.custodial_wallet_address;
+      if (!custodialAddress) {
+        const { address, secret } = await generateCustodialWallet();
+        await db.query(
+          'UPDATE players SET custodial_wallet_address = $1, custodial_wallet_secret = $2 WHERE wallet_address = $3',
+          [address, secret, wallet]
+        );
+        custodialAddress = address;
+      }
+
       socket.emit('profile_sync', {
         username: p.username,
         rating: p.rating,
-        chipsBalance: parseFloat(p.chips_balance),
+        solBalance: parseFloat(p.sol_balance || 0),
+        custodialWallet: custodialAddress,
         wins: p.wins,
         losses: p.losses,
         draws: p.draws
@@ -186,14 +266,14 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('create_room', async ({ roomName, betChips, hasPassword, roomPassword }) => {
+  socket.on('create_room', async ({ roomName, betSol, hasPassword, roomPassword }) => {
     if (!userWallet) return;
     const roomId = `room_${Date.now()}`;
     try {
       await db.query(
-        `INSERT INTO rooms (id, name, price, fee, status, password, player1_wallet)
+        `INSERT INTO rooms (id, name, bet_sol, fee_rate, status, password, player1_wallet)
          VALUES ($1, $2, $3, 0.02, 'OPEN', $4, $5)`,
-        [roomId, roomName.toUpperCase(), parseFloat(betChips || 50), hasPassword ? roomPassword : null, userWallet]
+        [roomId, roomName.toUpperCase(), parseFloat(betSol || 0.01), hasPassword ? roomPassword : null, userWallet]
       );
       socket.emit('room_created', roomId);
       broadcastLobbyState();
@@ -211,6 +291,15 @@ io.on('connection', (socket) => {
       const room = roomRes.rows[0];
       if (room.password && room.password !== password && room.player1_wallet !== userWallet) {
         socket.emit('join_error', 'Incorrect password'); return;
+      }
+
+      // Check player has enough SOL to play
+      const playerRes = await db.query('SELECT sol_balance FROM players WHERE wallet_address = $1', [userWallet]);
+      const solBalance = parseFloat(playerRes.rows[0]?.sol_balance || 0);
+      const betSol = parseFloat(room.bet_sol);
+      if (solBalance < betSol) {
+        socket.emit('join_error', `Insufficient balance. Need ${betSol} SOL, you have ${solBalance.toFixed(4)} SOL. Please deposit first.`);
+        return;
       }
 
       currentRoomId = roomId;
@@ -248,7 +337,7 @@ io.on('connection', (socket) => {
       const game = activeGames.get(roomId);
       io.to(roomId).emit('room_sync', {
         roomId, title: pData.name,
-        price: parseFloat(pData.price), fee: parseFloat(pData.fee),
+        betSol: parseFloat(pData.bet_sol), feeRate: parseFloat(pData.fee_rate),
         status: pData.status,
         player1: { wallet: pData.player1_wallet, name: pData.p1_name, rating: pData.p1_rating, wins: pData.p1_wins, losses: pData.p1_losses, draws: pData.p1_draws, history: game.history1 },
         player2: pData.player2_wallet ? { wallet: pData.player2_wallet, name: pData.p2_name, rating: pData.p2_rating, wins: pData.p2_wins, losses: pData.p2_losses, draws: pData.p2_draws, history: game.history2 } : null,
@@ -317,41 +406,52 @@ io.on('connection', (socket) => {
     game.history2.unshift(move2);
 
     try {
-      const roomRes = await db.query('SELECT price, fee FROM rooms WHERE id = $1', [roomId]);
-      const { price, fee } = roomRes.rows[0];
-      const betChips = parseFloat(price);
-      const feeRate = parseFloat(fee);
-      const feeChips = betChips * feeRate * 2; // fee from total pot
-      const winnerReceives = betChips * 2 - feeChips;
+      const roomRes = await db.query('SELECT bet_sol, fee_rate FROM rooms WHERE id = $1', [roomId]);
+      const { bet_sol, fee_rate } = roomRes.rows[0];
+      const betSol = parseFloat(bet_sol);
+      const feeRate = parseFloat(fee_rate);
+      const feeSol = betSol * 2 * feeRate;       // 2% of total pot
+      const winnerReceives = betSol * 2 - feeSol; // net winner payout
+      const giveawayContribution = feeSol * 0.30; // 30% of fee → giveaway pool
+      const platformFee = feeSol - giveawayContribution;
 
       let winnerWallet = null;
 
       if (winner === 'player1') {
         game.player1Score++;
         winnerWallet = game.player1Wallet;
-        await db.query('UPDATE players SET rating = rating + 25, wins = wins + 1, chips_balance = chips_balance + $1 WHERE wallet_address = $2', [winnerReceives - betChips, game.player1Wallet]);
-        await db.query('UPDATE players SET rating = GREATEST(100, rating - 15), losses = losses + 1, chips_balance = GREATEST(0, chips_balance - $1) WHERE wallet_address = $2', [betChips, game.player2Wallet]);
+        // Player 1 wins: gains (betSol net - betSol already in), player 2 loses betSol
+        await db.query('UPDATE players SET rating = rating + 25, wins = wins + 1, sol_balance = sol_balance + $1 WHERE wallet_address = $2', [winnerReceives - betSol, game.player1Wallet]);
+        await db.query('UPDATE players SET rating = GREATEST(100, rating - 15), losses = losses + 1, sol_balance = GREATEST(0, sol_balance - $1) WHERE wallet_address = $2', [betSol, game.player2Wallet]);
       } else if (winner === 'player2') {
         game.player2Score++;
         winnerWallet = game.player2Wallet;
-        await db.query('UPDATE players SET rating = GREATEST(100, rating - 15), losses = losses + 1, chips_balance = GREATEST(0, chips_balance - $1) WHERE wallet_address = $2', [betChips, game.player1Wallet]);
-        await db.query('UPDATE players SET rating = rating + 25, wins = wins + 1, chips_balance = chips_balance + $1 WHERE wallet_address = $2', [winnerReceives - betChips, game.player2Wallet]);
+        await db.query('UPDATE players SET rating = GREATEST(100, rating - 15), losses = losses + 1, sol_balance = GREATEST(0, sol_balance - $1) WHERE wallet_address = $2', [betSol, game.player1Wallet]);
+        await db.query('UPDATE players SET rating = rating + 25, wins = wins + 1, sol_balance = sol_balance + $1 WHERE wallet_address = $2', [winnerReceives - betSol, game.player2Wallet]);
       } else {
+        // Draw — no SOL changes, just stat update
         await db.query('UPDATE players SET draws = draws + 1 WHERE wallet_address = $1', [game.player1Wallet]);
         await db.query('UPDATE players SET draws = draws + 1 WHERE wallet_address = $1', [game.player2Wallet]);
       }
 
-      // Add portion of fee to giveaway pool
-      const configRes = await db.query("SELECT value FROM platform_config WHERE key = 'giveaway_pool_rate'");
-      const poolRate = parseFloat(configRes.rows[0]?.value || 0.30);
-      const poolContribution = feeChips * poolRate;
-      await db.query("UPDATE platform_config SET value = CAST(CAST(value AS DECIMAL) + $1 AS TEXT), updated_at = NOW() WHERE key = 'giveaway_pool_chips'", [poolContribution]);
+      if (winner !== 'draw') {
+        // Accumulate platform fee
+        await db.query(
+          "UPDATE platform_config SET value = CAST(CAST(value AS DECIMAL) + $1 AS TEXT), updated_at = NOW() WHERE key = 'platform_fees_collected_sol'",
+          [platformFee]
+        );
+        // Accumulate giveaway pool
+        await db.query(
+          "UPDATE platform_config SET value = CAST(CAST(value AS DECIMAL) + $1 AS TEXT), updated_at = NOW() WHERE key = 'giveaway_pool_sol'",
+          [giveawayContribution]
+        );
+      }
 
       // Record match
       await db.query(
-        `INSERT INTO matches (room_id, player1_wallet, player2_wallet, winner_wallet, player1_move, player2_move, bet_chips, fee_chips)
+        `INSERT INTO matches (room_id, player1_wallet, player2_wallet, winner_wallet, player1_move, player2_move, bet_sol, fee_sol)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [roomId, game.player1Wallet, game.player2Wallet, winnerWallet, move1, move2, betChips, feeChips]
+        [roomId, game.player1Wallet, game.player2Wallet, winnerWallet, move1, move2, betSol, winner !== 'draw' ? feeSol : 0]
       );
 
       io.to(roomId).emit('round_resolved', {
@@ -361,13 +461,13 @@ io.on('connection', (socket) => {
       });
 
       const [p1Profile, p2Profile] = await Promise.all([
-        db.query('SELECT rating, chips_balance, wins, losses, draws FROM players WHERE wallet_address = $1', [game.player1Wallet]),
-        db.query('SELECT rating, chips_balance, wins, losses, draws FROM players WHERE wallet_address = $1', [game.player2Wallet])
+        db.query('SELECT rating, sol_balance, wins, losses, draws FROM players WHERE wallet_address = $1', [game.player1Wallet]),
+        db.query('SELECT rating, sol_balance, wins, losses, draws FROM players WHERE wallet_address = $1', [game.player2Wallet])
       ]);
 
       io.to(roomId).emit('profile_sync_update', {
-        player1: { wallet: game.player1Wallet, rating: p1Profile.rows[0].rating, chipsBalance: parseFloat(p1Profile.rows[0].chips_balance), wins: p1Profile.rows[0].wins, losses: p1Profile.rows[0].losses, draws: p1Profile.rows[0].draws },
-        player2: { wallet: game.player2Wallet, rating: p2Profile.rows[0].rating, chipsBalance: parseFloat(p2Profile.rows[0].chips_balance), wins: p2Profile.rows[0].wins, losses: p2Profile.rows[0].losses, draws: p2Profile.rows[0].draws }
+        player1: { wallet: game.player1Wallet, rating: p1Profile.rows[0].rating, solBalance: parseFloat(p1Profile.rows[0].sol_balance), wins: p1Profile.rows[0].wins, losses: p1Profile.rows[0].losses, draws: p1Profile.rows[0].draws },
+        player2: { wallet: game.player2Wallet, rating: p2Profile.rows[0].rating, solBalance: parseFloat(p2Profile.rows[0].sol_balance), wins: p2Profile.rows[0].wins, losses: p2Profile.rows[0].losses, draws: p2Profile.rows[0].draws }
       });
 
       game.player1Move = null;
@@ -468,14 +568,15 @@ io.on('connection', (socket) => {
 // ─────────────────────────────────────────────
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'healthy', timestamp: new Date().toISOString() });
+  db.query('SELECT 1').then(() => res.json({ status: 'healthy', db: 'connected', timestamp: new Date().toISOString() }))
+    .catch(() => res.status(500).json({ status: 'unhealthy', db: 'disconnected' }));
 });
 
 app.get('/api/profile/:wallet', async (req, res) => {
   try {
     const { wallet } = req.params;
     const playerRes = await db.query(
-      'SELECT wallet_address, username, rating, wins, losses, draws, chips_balance, last_active FROM players WHERE wallet_address = $1',
+      'SELECT wallet_address, username, rating, wins, losses, draws, sol_balance, custodial_wallet_address, last_active FROM players WHERE wallet_address = $1',
       [wallet]
     );
     if (!playerRes.rows[0]) return res.status(404).json({ error: 'Player not found' });
@@ -490,17 +591,14 @@ app.get('/api/profile/:wallet', async (req, res) => {
     );
 
     const rankRes = await db.query(
-      'SELECT COUNT(*) + 1 as rank FROM players WHERE chips_balance > (SELECT chips_balance FROM players WHERE wallet_address = $1)',
+      'SELECT COUNT(*) + 1 as rank FROM players WHERE rating > (SELECT rating FROM players WHERE wallet_address = $1)',
       [wallet]
     );
 
-    const config = await getConfig();
     const p = playerRes.rows[0];
-
     res.json({
       ...p,
-      chips_balance: parseFloat(p.chips_balance),
-      sol_equivalent: (parseFloat(p.chips_balance) / parseFloat(config.chips_per_sol || 1000)).toFixed(4),
+      sol_balance: parseFloat(p.sol_balance || 0),
       rank: parseInt(rankRes.rows[0].rank),
       recent_matches: matchesRes.rows
     });
@@ -523,70 +621,122 @@ app.post('/api/profile/username', async (req, res) => {
   }
 });
 
-app.get('/api/config/deposit-tiers', async (_req, res) => {
+// Get custodial wallet info for a player
+app.get('/api/wallet/info/:wallet', async (req, res) => {
   try {
-    const config = await getConfig();
-    const depositFee = parseFloat(config.deposit_fee_rate || 0.03);
-    
-    // Exact League of Legends RP equivalent bundles mapped to SOL values (without bonuses)
-    const tiers = [
-      { sol: 0.03, totalChips: 575 },
-      { sol: 0.07, totalChips: 1380 },
-      { sol: 0.14, totalChips: 2800 },
-      { sol: 0.23, totalChips: 4500 },
-      { sol: 0.33, totalChips: 6500 },
-      { sol: 0.66, totalChips: 13500 },
-    ].map(t => ({
-      sol: t.sol,
-      totalChips: t.totalChips,
-      feeChips: Math.round(t.totalChips * depositFee)
-    }));
-    
+    const result = await db.query(
+      'SELECT custodial_wallet_address, sol_balance FROM players WHERE wallet_address = $1',
+      [req.params.wallet]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Player not found' });
     res.json({
-      tiers,
-      chipsPerSol: parseFloat(config.chips_per_sol || 1000),
-      depositFee,
-      withdrawFee: parseFloat(config.withdraw_fee_rate || 0.05),
-      platformWallet: config.platform_wallet_address || '7o7YrgFHTbxWGezYeue36Lfv6vzXzEsZQVePY4ic66s6'
+      custodialAddress: result.rows[0].custodial_wallet_address,
+      solBalance: parseFloat(result.rows[0].sol_balance || 0)
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Withdrawal request — logged as PENDING for admin to process
-app.post('/api/withdraw/request', async (req, res) => {
-  const { wallet, chipsAmount } = req.body;
-  if (!wallet || !chipsAmount || chipsAmount < 100) {
-    return res.status(400).json({ error: 'Minimum withdrawal is 100 CHIPS' });
-  }
+// Fetch live on-chain SOL balance and sync to DB
+app.post('/api/wallet/sync-balance', async (req, res) => {
+  const { wallet } = req.body;
+  if (!wallet) return res.status(400).json({ error: 'wallet required' });
   try {
     const config = await getConfig();
-    const chipsPerSol = parseFloat(config.chips_per_sol || 1000);
-    const withdrawFee = parseFloat(config.withdraw_fee_rate || 0.05);
-    const feeChips = Math.round(chipsAmount * withdrawFee);
-    const netChips = chipsAmount - feeChips;
-    const solAmount = netChips / chipsPerSol;
-
-    const playerRes = await db.query('SELECT chips_balance FROM players WHERE wallet_address = $1', [wallet]);
-    if (!playerRes.rows[0]) return res.status(404).json({ error: 'Player not found' });
-    if (parseFloat(playerRes.rows[0].chips_balance) < chipsAmount) {
-      return res.status(400).json({ error: 'Insufficient CHIPS balance' });
-    }
-
-    // Reserve the chips immediately
-    await db.query('UPDATE players SET chips_balance = chips_balance - $1 WHERE wallet_address = $2', [chipsAmount, wallet]);
-
-    await db.query(
-      `INSERT INTO transactions (wallet_address, type, chips_amount, sol_amount, fee_chips, status, notes)
-       VALUES ($1, 'WITHDRAW', $2, $3, $4, 'PENDING', $5)`,
-      [wallet, chipsAmount, solAmount, feeChips, `Withdraw ${chipsAmount} CHIPS → ${solAmount.toFixed(4)} SOL (fee: ${feeChips} CHIPS)`]
+    const playerRes = await db.query(
+      'SELECT custodial_wallet_address FROM players WHERE wallet_address = $1', [wallet]
     );
-
-    res.json({ success: true, chipsAmount, feeChips, netChips, solAmount: solAmount.toFixed(4), message: 'Withdrawal request submitted. Processing within 24 hours.' });
+    if (!playerRes.rows[0] || !playerRes.rows[0].custodial_wallet_address) {
+      return res.status(404).json({ error: 'Custodial wallet not found' });
+    }
+    const custodialAddress = playerRes.rows[0].custodial_wallet_address;
+    const onChainBalance = await getSolBalance(custodialAddress, config.sol_rpc_url);
+    
+    // Only increase balance from on-chain (don't decrease — game deductions are internal)
+    await db.query(
+      'UPDATE players SET sol_balance = GREATEST(sol_balance, $1) WHERE wallet_address = $2',
+      [onChainBalance, wallet]
+    );
+    
+    const updated = await db.query('SELECT sol_balance FROM players WHERE wallet_address = $1', [wallet]);
+    res.json({ solBalance: parseFloat(updated.rows[0].sol_balance), custodialAddress });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Withdraw — send real SOL from custodial wallet to player's connected wallet
+app.post('/api/withdraw', async (req, res) => {
+  const { wallet, solAmount } = req.body;
+  const minWithdraw = 0.001;
+  const withdrawFee = 0.01; // 1% fee
+  if (!wallet || !solAmount || parseFloat(solAmount) < minWithdraw) {
+    return res.status(400).json({ error: `Minimum withdrawal is ${minWithdraw} SOL` });
+  }
+  try {
+    const config = await getConfig();
+    const playerRes = await db.query(
+      'SELECT sol_balance, custodial_wallet_address, custodial_wallet_secret FROM players WHERE wallet_address = $1',
+      [wallet]
+    );
+    if (!playerRes.rows[0]) return res.status(404).json({ error: 'Player not found' });
+
+    const p = playerRes.rows[0];
+    const amount = parseFloat(solAmount);
+    const fee = amount * withdrawFee;
+    const netAmount = amount - fee;
+    const balance = parseFloat(p.sol_balance || 0);
+
+    if (balance < amount) {
+      return res.status(400).json({ error: `Insufficient balance. You have ${balance.toFixed(4)} SOL.` });
+    }
+
+    // Deduct from DB immediately to prevent double-spend
+    await db.query('UPDATE players SET sol_balance = sol_balance - $1 WHERE wallet_address = $2', [amount, wallet]);
+
+    // Log the transaction as PENDING
+    const txRow = await db.query(
+      `INSERT INTO transactions (wallet_address, type, sol_amount, fee_sol, status, notes)
+       VALUES ($1, 'WITHDRAW', $2, $3, 'PENDING', $4) RETURNING id`,
+      [wallet, amount, fee, `Withdraw ${amount} SOL (fee ${fee.toFixed(6)} SOL) → ${wallet}`]
+    );
+
+    // Send real on-chain transaction
+    try {
+      const signature = await sendSolOnChain(p.custodial_wallet_secret, wallet, netAmount, config.sol_rpc_url);
+      await db.query(
+        "UPDATE transactions SET status = 'COMPLETED', tx_signature = $1, completed_at = NOW() WHERE id = $2",
+        [signature, txRow.rows[0].id]
+      );
+      // Add fee to platform collected fees
+      await db.query(
+        "UPDATE platform_config SET value = CAST(CAST(value AS DECIMAL) + $1 AS TEXT), updated_at = NOW() WHERE key = 'platform_fees_collected_sol'",
+        [fee]
+      );
+      res.json({ success: true, solAmount: netAmount.toFixed(6), fee: fee.toFixed(6), signature });
+    } catch (sendErr) {
+      // Rollback balance if send fails
+      await db.query('UPDATE players SET sol_balance = sol_balance + $1 WHERE wallet_address = $2', [amount, wallet]);
+      await db.query("UPDATE transactions SET status = 'FAILED', notes = $1 WHERE id = $2", [sendErr.message, txRow.rows[0].id]);
+      res.status(500).json({ error: 'On-chain transfer failed: ' + sendErr.message });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Giveaway winners history (public)
+app.get('/api/giveaway-history', async (_req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT gw.username, gw.sol_won, to_char(gw.won_at, 'DD Mon YYYY') as date, g.title
+      FROM giveaway_winners gw
+      JOIN giveaways g ON gw.giveaway_id = g.id
+      ORDER BY gw.won_at DESC LIMIT 20
+    `);
+    res.json(result.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ─────────────────────────────────────────────
@@ -633,9 +783,10 @@ app.get('/api/admin/stats', adminAuth, async (_req, res) => {
           (SELECT COUNT(*) FROM rooms) as total_rooms,
           (SELECT COUNT(*) FROM rooms WHERE status = 'OPEN' OR status = 'PLAYING') as active_rooms,
           (SELECT COUNT(*) FROM matches) as total_matches,
-          (SELECT COALESCE(SUM(fee_chips),0) FROM matches) as total_fees_chips,
+          (SELECT COALESCE(SUM(fee_sol),0) FROM matches) as total_fees_sol,
           (SELECT COUNT(*) FROM transactions WHERE type = 'WITHDRAW' AND status = 'PENDING') as pending_withdrawals,
-          (SELECT COUNT(*) FROM giveaways WHERE status = 'ACTIVE') as active_giveaways
+          (SELECT COUNT(*) FROM giveaways WHERE status = 'ACTIVE') as active_giveaways,
+          (SELECT COALESCE(value,'0') FROM platform_config WHERE key = 'platform_fees_collected_sol') as fees_collected_sol
       `),
       db.query('SELECT key, value FROM platform_config')
     ]);
@@ -649,7 +800,10 @@ app.get('/api/admin/players', adminAuth, async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
     const offset = parseInt(req.query.offset) || 0;
-    const result = await db.query(`SELECT wallet_address, username, rating, wins, losses, draws, chips_balance, to_char(last_active, 'DD Mon YYYY HH24:MI') as last_active FROM players ORDER BY chips_balance DESC LIMIT $1 OFFSET $2`, [limit, offset]);
+    const result = await db.query(
+      `SELECT wallet_address, username, rating, wins, losses, draws, sol_balance, custodial_wallet_address, to_char(last_active, 'DD Mon YYYY HH24:MI') as last_active FROM players ORDER BY sol_balance DESC LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
     const count = await db.query('SELECT COUNT(*) FROM players');
     res.json({ players: result.rows, total: parseInt(count.rows[0].count) });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -666,55 +820,53 @@ app.get('/api/admin/transactions', adminAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Approve withdrawal — admin manually sends SOL, then marks complete
-app.post('/api/admin/transactions/:id/complete', adminAuth, async (req, res) => {
-  const { tx_signature } = req.body;
+// Manual SOL credit (admin override — for testing or airdrop)
+app.post('/api/admin/credit-sol', adminAuth, async (req, res) => {
+  const { wallet, solAmount, notes } = req.body;
   try {
+    await db.query('UPDATE players SET sol_balance = sol_balance + $1 WHERE wallet_address = $2', [solAmount, wallet]);
     await db.query(
-      `UPDATE transactions SET status = 'COMPLETED', tx_signature = $1, completed_at = NOW() WHERE id = $2 AND type = 'WITHDRAW'`,
-      [tx_signature || 'MANUAL', req.params.id]
-    );
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Reject withdrawal — refund chips
-app.post('/api/admin/transactions/:id/reject', adminAuth, async (req, res) => {
-  try {
-    const txRes = await db.query('SELECT * FROM transactions WHERE id = $1', [req.params.id]);
-    if (!txRes.rows[0]) return res.status(404).json({ error: 'Not found' });
-    const tx = txRes.rows[0];
-    await db.query('UPDATE players SET chips_balance = chips_balance + $1 WHERE wallet_address = $2', [tx.chips_amount, tx.wallet_address]);
-    await db.query("UPDATE transactions SET status = 'REJECTED', completed_at = NOW() WHERE id = $1", [req.params.id]);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Manual chips credit (for deposits received via wallet)
-app.post('/api/admin/credit-chips', adminAuth, async (req, res) => {
-  const { wallet, chips, sol, tx_signature, notes } = req.body;
-  try {
-    await db.query('UPDATE players SET chips_balance = chips_balance + $1 WHERE wallet_address = $2', [chips, wallet]);
-    await db.query(
-      `INSERT INTO transactions (wallet_address, type, chips_amount, sol_amount, status, tx_signature, notes)
-       VALUES ($1, 'DEPOSIT', $2, $3, 'COMPLETED', $4, $5)`,
-      [wallet, chips, sol || 0, tx_signature || 'MANUAL', notes || `Manual credit: ${chips} CHIPS`]
+      `INSERT INTO transactions (wallet_address, type, sol_amount, status, notes)
+       VALUES ($1, 'CREDIT', $2, 'COMPLETED', $3)`,
+      [wallet, solAmount, notes || `Admin credit: ${solAmount} SOL`]
     );
     broadcastLobbyState();
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Sweep all collected platform fees to the business wallet
+app.post('/api/admin/sweep-fees', adminAuth, async (req, res) => {
+  try {
+    const config = await getConfig();
+    const collectedSol = parseFloat(config.platform_fees_collected_sol || 0);
+    if (collectedSol < 0.001) {
+      return res.status(400).json({ error: `Not enough fees to sweep. Current: ${collectedSol} SOL` });
+    }
+    // For the fee sweep we need a platform custodial wallet — use the first player with the most fees
+    // In practice, fees are virtual (game ledger). Admin sweeps them by manually moving from the 
+    // custodial wallets. This endpoint just resets the counter and records the intent.
+    const platformWallet = config.platform_wallet_address || '7o7YrgFHTbxWGezYeue36Lfv6vzXzEsZQVePY4ic66s6';
+    await db.query("UPDATE platform_config SET value = '0', updated_at = NOW() WHERE key = 'platform_fees_collected_sol'");
+    await db.query(
+      `INSERT INTO transactions (wallet_address, type, sol_amount, status, notes)
+       VALUES ($1, 'FEE_SWEEP', $2, 'COMPLETED', $3)`,
+      [platformWallet, collectedSol, `Fee sweep: ${collectedSol} SOL → ${platformWallet}`]
+    );
+    res.json({ success: true, sweptSol: collectedSol, to: platformWallet });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/admin/rooms', adminAuth, async (_req, res) => {
   try {
-    const result = await db.query(`SELECT r.id, r.name, r.status, r.price, r.fee, to_char(r.created_at, 'DD Mon YYYY HH24:MI') as created_at, p1.username as player1, p2.username as player2 FROM rooms r LEFT JOIN players p1 ON r.player1_wallet = p1.wallet_address LEFT JOIN players p2 ON r.player2_wallet = p2.wallet_address ORDER BY r.created_at DESC LIMIT 100`);
+    const result = await db.query(`SELECT r.id, r.name, r.status, r.bet_sol, r.fee_rate, to_char(r.created_at, 'DD Mon YYYY HH24:MI') as created_at, p1.username as player1, p2.username as player2 FROM rooms r LEFT JOIN players p1 ON r.player1_wallet = p1.wallet_address LEFT JOIN players p2 ON r.player2_wallet = p2.wallet_address ORDER BY r.created_at DESC LIMIT 100`);
     res.json(result.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/admin/matches', adminAuth, async (req, res) => {
   try {
-    const result = await db.query(`SELECT m.id, m.room_id, m.player1_move, m.player2_move, m.bet_chips, m.fee_chips, to_char(m.played_at,'DD Mon YYYY HH24:MI') as played_at, p1.username as player1, p2.username as player2, pw.username as winner FROM matches m LEFT JOIN players p1 ON m.player1_wallet = p1.wallet_address LEFT JOIN players p2 ON m.player2_wallet = p2.wallet_address LEFT JOIN players pw ON m.winner_wallet = pw.wallet_address ORDER BY m.played_at DESC LIMIT ${parseInt(req.query.limit) || 100}`);
+    const result = await db.query(`SELECT m.id, m.room_id, m.player1_move, m.player2_move, m.bet_sol, m.fee_sol, to_char(m.played_at,'DD Mon YYYY HH24:MI') as played_at, p1.username as player1, p2.username as player2, pw.username as winner FROM matches m LEFT JOIN players p1 ON m.player1_wallet = p1.wallet_address LEFT JOIN players p2 ON m.player2_wallet = p2.wallet_address LEFT JOIN players pw ON m.winner_wallet = pw.wallet_address ORDER BY m.played_at DESC LIMIT ${parseInt(req.query.limit) || 100}`);
     res.json(result.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -734,11 +886,11 @@ app.get('/api/admin/room-tiers', adminAuth, async (_req, res) => {
 });
 
 app.put('/api/admin/room-tiers/:id', adminAuth, async (req, res) => {
-  const { title, bet_chips, fee_rate, is_ranked, display_order, is_active } = req.body;
+  const { title, bet_sol, fee_rate, is_ranked, display_order, is_active } = req.body;
   try {
     const result = await db.query(
-      `UPDATE room_tiers SET title=$1, bet_chips=$2, fee_rate=$3, is_ranked=$4, display_order=$5, is_active=$6 WHERE id=$7 RETURNING *`,
-      [title, bet_chips, fee_rate, is_ranked, display_order, is_active, req.params.id]
+      `UPDATE room_tiers SET title=$1, bet_sol=$2, fee_rate=$3, is_ranked=$4, display_order=$5, is_active=$6 WHERE id=$7 RETURNING *`,
+      [title, bet_sol, fee_rate, is_ranked, display_order, is_active, req.params.id]
     );
     broadcastLobbyState();
     res.json(result.rows[0]);
@@ -764,23 +916,23 @@ app.put('/api/admin/config/:key', adminAuth, async (req, res) => {
 // Giveaways CRUD
 app.get('/api/admin/giveaways', adminAuth, async (_req, res) => {
   try {
-    res.json((await db.query(`SELECT id, title, description, prize_chips, winner_count, status, to_char(end_date,'DD.MM.YYYY') as end_date_str, to_char(created_at,'DD Mon YYYY') as created_at FROM giveaways ORDER BY created_at DESC`)).rows);
+    res.json((await db.query(`SELECT id, title, description, prize_sol, winner_count, status, to_char(end_date,'DD.MM.YYYY') as end_date_str, to_char(created_at,'DD Mon YYYY') as created_at FROM giveaways ORDER BY created_at DESC`)).rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/admin/giveaways', adminAuth, async (req, res) => {
-  const { title, description, prize_chips, winner_count, end_date } = req.body;
+  const { title, description, prize_sol, winner_count, end_date } = req.body;
   try {
-    const result = await db.query(`INSERT INTO giveaways (title, description, prize_chips, winner_count, end_date, status) VALUES ($1, $2, $3, $4, $5, 'ACTIVE') RETURNING *`, [title, description || '', prize_chips || 0, winner_count || 1, end_date || null]);
+    const result = await db.query(`INSERT INTO giveaways (title, description, prize_sol, winner_count, end_date, status) VALUES ($1, $2, $3, $4, $5, 'ACTIVE') RETURNING *`, [title, description || '', prize_sol || 0, winner_count || 1, end_date || null]);
     broadcastLobbyState();
     res.json(result.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.put('/api/admin/giveaways/:id', adminAuth, async (req, res) => {
-  const { title, description, prize_chips, winner_count, end_date, status } = req.body;
+  const { title, description, prize_sol, winner_count, end_date, status } = req.body;
   try {
-    const result = await db.query(`UPDATE giveaways SET title=$1, description=$2, prize_chips=$3, winner_count=$4, end_date=$5, status=$6 WHERE id=$7 RETURNING *`, [title, description || '', prize_chips || 0, winner_count || 1, end_date || null, status || 'ACTIVE', req.params.id]);
+    const result = await db.query(`UPDATE giveaways SET title=$1, description=$2, prize_sol=$3, winner_count=$4, end_date=$5, status=$6 WHERE id=$7 RETURNING *`, [title, description || '', prize_sol || 0, winner_count || 1, end_date || null, status || 'ACTIVE', req.params.id]);
     broadcastLobbyState();
     res.json(result.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -794,16 +946,13 @@ app.delete('/api/admin/giveaways/:id', adminAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Distribute giveaway — admin triggers this
+// Distribute giveaway
 app.post('/api/admin/giveaways/:id/distribute', adminAuth, async (req, res) => {
   try {
     const gwRes = await db.query('SELECT * FROM giveaways WHERE id = $1', [req.params.id]);
     if (!gwRes.rows[0]) return res.status(404).json({ error: 'Giveaway not found' });
     const gw = gwRes.rows[0];
-    const config = await getConfig();
-    const chipsPerSol = parseFloat(config.chips_per_sol || 1000);
 
-    // Pick random eligible winners (played at least 1 match in last 7 days)
     const eligibleRes = await db.query(
       `SELECT DISTINCT p.wallet_address, p.username FROM players p
        JOIN matches m ON (m.player1_wallet = p.wallet_address OR m.player2_wallet = p.wallet_address)
@@ -812,36 +961,25 @@ app.post('/api/admin/giveaways/:id/distribute', adminAuth, async (req, res) => {
     );
 
     const winners = eligibleRes.rows;
-    const chipsPerWinner = parseFloat(gw.prize_chips) / Math.max(winners.length, 1);
+    const solPerWinner = parseFloat(gw.prize_sol) / Math.max(winners.length, 1);
 
     for (const winner of winners) {
-      await db.query('UPDATE players SET chips_balance = chips_balance + $1 WHERE wallet_address = $2', [chipsPerWinner, winner.wallet_address]);
+      await db.query('UPDATE players SET sol_balance = sol_balance + $1 WHERE wallet_address = $2', [solPerWinner, winner.wallet_address]);
       await db.query(
-        `INSERT INTO giveaway_winners (giveaway_id, wallet_address, username, chips_won, sol_equivalent) VALUES ($1, $2, $3, $4, $5)`,
-        [gw.id, winner.wallet_address, winner.username, chipsPerWinner, chipsPerWinner / chipsPerSol]
+        `INSERT INTO giveaway_winners (giveaway_id, wallet_address, username, sol_won) VALUES ($1, $2, $3, $4)`,
+        [gw.id, winner.wallet_address, winner.username, solPerWinner]
       );
     }
 
     await db.query("UPDATE giveaways SET status = 'COMPLETED' WHERE id = $1", [gw.id]);
+    // Deduct from giveaway pool
+    await db.query(
+      "UPDATE platform_config SET value = CAST(GREATEST(0, CAST(value AS DECIMAL) - $1) AS TEXT), updated_at = NOW() WHERE key = 'giveaway_pool_sol'",
+      [parseFloat(gw.prize_sol)]
+    );
     broadcastLobbyState();
-
-    // Announce to lobby
-    io.to('lobby').emit('giveaway_winners', { title: gw.title, winners: winners.map(w => ({ username: w.username, chipsWon: chipsPerWinner })) });
-
-    res.json({ success: true, winnersCount: winners.length, chipsPerWinner });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Giveaway winners history (public)
-app.get('/api/giveaway-history', async (_req, res) => {
-  try {
-    const result = await db.query(`
-      SELECT gw.username, gw.chips_won, gw.sol_equivalent, to_char(gw.won_at, 'DD Mon YYYY') as date, g.title
-      FROM giveaway_winners gw
-      JOIN giveaways g ON gw.giveaway_id = g.id
-      ORDER BY gw.won_at DESC LIMIT 20
-    `);
-    res.json(result.rows);
+    io.to('lobby').emit('giveaway_winners', { title: gw.title, winners: winners.map(w => ({ username: w.username, solWon: solPerWinner })) });
+    res.json({ success: true, winnersCount: winners.length, solPerWinner });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

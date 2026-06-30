@@ -25,7 +25,7 @@ function GameApp() {
 
   // Local Form States for Room Creation Modal
   const [roomName, setRoomName] = useState('');
-  const [betAmount, setBetAmount] = useState('50');
+  const [betAmount, setBetAmount] = useState('0.01');
   const [hasPassword, setHasPassword] = useState(false);
   const [roomPassword, setRoomPassword] = useState('');
 
@@ -39,8 +39,8 @@ function GameApp() {
   const handleCreateSubmit = (e) => {
     e.preventDefault();
     if (!roomName.trim()) { alert("Please enter a room name."); return; }
-    createCustomRoom(roomName, betAmount, hasPassword ? roomPassword : '');
-    setRoomName(''); setBetAmount('50'); setHasPassword(false); setRoomPassword('');
+    createCustomRoom(roomName, parseFloat(betAmount), hasPassword ? roomPassword : '');
+    setRoomName(''); setBetAmount('0.01'); setHasPassword(false); setRoomPassword('');
   };
 
   return (
@@ -70,11 +70,11 @@ function GameApp() {
           <button
             className="sidebar-btn"
             onClick={() => setDepositOpen(true)}
-            aria-label="Buy CHIPS"
-            title="Buy CHIPS"
+            aria-label="Deposit SOL"
+            title="Deposit SOL"
             style={{ color: 'var(--accent-color)' }}
           >
-            ⬡
+            ◎
           </button>
         )}
       </nav>
@@ -104,8 +104,8 @@ function GameApp() {
                 <input type="text" id="modal-room-name" className="form-input" placeholder="e.g. My Game" value={roomName} onChange={(e) => setRoomName(e.target.value)} maxLength={18} required />
               </div>
               <div className="form-group">
-                <label htmlFor="modal-bet-amount" className="form-label">Bet Amount (CHIPS)</label>
-                <input type="number" id="modal-bet-amount" className="form-input" step="1" min="10" value={betAmount} onChange={(e) => setBetAmount(e.target.value)} required />
+                <label htmlFor="modal-bet-amount" className="form-label">Bet Amount (SOL)</label>
+                <input type="number" id="modal-bet-amount" className="form-input" step="0.001" min="0.001" value={betAmount} onChange={(e) => setBetAmount(e.target.value)} required />
               </div>
               <div className="form-group-switch">
                 <span className="switch-label">Require Password</span>

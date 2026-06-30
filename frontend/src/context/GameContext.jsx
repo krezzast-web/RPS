@@ -9,7 +9,8 @@ export const GameProvider = ({ children }) => {
   // Wallet & Player Profile
   const [walletConnected, setWalletConnected] = useState(false);
   const [walletAddress, setWalletAddress] = useState('');
-  const [chipsBalance, setChipsBalance] = useState(0);
+  const [solBalance, setSolBalance] = useState(0);
+  const [custodialWallet, setCustodialWallet] = useState('');
   const [rpsRating, setRpsRating] = useState(1000);
   const [username, setUsername] = useState('Player');
   const [playerWins, setPlayerWins] = useState(0);
@@ -28,7 +29,7 @@ export const GameProvider = ({ children }) => {
   const [topRanks, setTopRanks] = useState([]);
   const [giveaways, setGiveaways] = useState([]);
   const [roomTiers, setRoomTiers] = useState([]);
-  const [lobbyStats, setLobbyStats] = useState({ wallets: 0, rooms: 0, matches: 0, giveaways: 0, poolChips: 0, poolSol: '0' });
+  const [lobbyStats, setLobbyStats] = useState({ wallets: 0, rooms: 0, matches: 0, giveaways: 0, poolSol: '0', feesCollectedSol: '0' });
 
   // Matchmaking State Machine
   const [matchmakingState, setMatchmakingState] = useState('waiting_for_opponent');
@@ -68,7 +69,8 @@ export const GameProvider = ({ children }) => {
     socket.on('profile_sync', (profile) => {
       setUsername(profile.username);
       setRpsRating(profile.rating);
-      setChipsBalance(profile.chipsBalance || 0);
+      setSolBalance(parseFloat(profile.solBalance || 0));
+      setCustodialWallet(profile.custodialWallet || '');
       setPlayerWins(profile.wins || 0);
       setPlayerLosses(profile.losses || 0);
       setPlayerDraws(profile.draws || 0);
@@ -79,7 +81,7 @@ export const GameProvider = ({ children }) => {
       setCustomRooms(lobbyData.customRooms || []);
       setTopRanks(lobbyData.topRanks || []);
       setRoomTiers(lobbyData.roomTiers || []);
-      setLobbyStats(lobbyData.stats || { wallets: 0, rooms: 0, matches: 0, giveaways: 0, poolChips: 0, poolSol: '0' });
+      setLobbyStats(lobbyData.stats || { wallets: 0, rooms: 0, matches: 0, giveaways: 0, poolSol: '0', feesCollectedSol: '0' });
       setGiveaways(lobbyData.giveaways || []);
       if (lobbyData.chatMessages) {
         setChatMessages(lobbyData.chatMessages.map((m, i) => ({ ...m, id: m.id || i, tab: 'general' })));
@@ -94,8 +96,8 @@ export const GameProvider = ({ children }) => {
       setActiveRoom({
         id: syncData.roomId,
         title: syncData.title,
-        price: syncData.price,
-        fee: syncData.fee,
+        betSol: syncData.betSol,
+        feeRate: syncData.feeRate,
         player1Wallet: syncData.player1.wallet
       });
 
@@ -191,7 +193,7 @@ export const GameProvider = ({ children }) => {
       const oppProfile = isP1 ? profiles.player2 : profiles.player1;
 
       setRpsRating(myProfile.rating);
-      setChipsBalance(myProfile.chipsBalance || 0);
+      setSolBalance(parseFloat(myProfile.solBalance || 0));
       setPlayerWins(myProfile.wins || 0);
       setPlayerLosses(myProfile.losses || 0);
       setPlayerDraws(myProfile.draws || 0);
@@ -200,7 +202,7 @@ export const GameProvider = ({ children }) => {
         setOpponent(prev => prev ? {
           ...prev,
           rating: oppProfile.rating,
-          chipsBalance: oppProfile.chipsBalance || 0,
+          solBalance: parseFloat(oppProfile.solBalance || 0),
           wins: oppProfile.wins || 0,
           losses: oppProfile.losses || 0,
           draws: oppProfile.draws || 0
@@ -279,7 +281,6 @@ export const GameProvider = ({ children }) => {
     }
   };
 
-
   // Ref to track player1 wallet of the current room (solves stale closure in round_resolved)
   const currentRoomPlayer1WalletRef = useRef('');
 
@@ -298,7 +299,6 @@ export const GameProvider = ({ children }) => {
     }, 500);
   };
 
-  // Intercept room_sync to update our player1 wallet ref
   const joinRoomWithRef = (room) => {
     joinRoom(room);
   };
@@ -306,10 +306,10 @@ export const GameProvider = ({ children }) => {
   const disconnectWallet = () => {
     localStorage.removeItem('rps_wallet_address');
     if (socketRef.current) {
-      // Don't fully disconnect socket, just re-join as guest so lobby updates continue!
       setWalletConnected(false);
       setWalletAddress('');
-      setChipsBalance(0);
+      setSolBalance(0);
+      setCustodialWallet('');
       setActiveView('lobby');
       setActiveRoom(null);
       walletRef.current = '';
@@ -359,11 +359,11 @@ export const GameProvider = ({ children }) => {
   const searchAnotherRoom = () => { leaveRoom(); };
   const waitNextOpponent = () => {};
 
-  const createCustomRoom = (name, betAmount, password) => {
+  const createCustomRoom = (name, betSol, password) => {
     if (socketRef.current) {
       socketRef.current.emit('create_room', {
         roomName: name,
-        betAmount,
+        betSol,
         hasPassword: !!password,
         roomPassword: password
       });
@@ -372,7 +372,7 @@ export const GameProvider = ({ children }) => {
 
   return (
     <GameContext.Provider value={{
-      walletConnected, walletAddress, chipsBalance, rpsRating, username,
+      walletConnected, walletAddress, solBalance, custodialWallet, rpsRating, username,
       playerWins, playerLosses, playerDraws,
       activeView, activeRoom,
       customRooms, createRoomModalOpen, setCreateRoomModalOpen, createCustomRoom,

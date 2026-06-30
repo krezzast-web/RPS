@@ -98,8 +98,8 @@ export default function Profile({ wallet, onClose }) {
                   <div style={s.statLabel}>Rank</div>
                 </div>
                 <div style={s.statBox}>
-                  <div style={s.statValue}>{parseFloat(data.chips_balance).toLocaleString()}</div>
-                  <div style={s.statLabel}>CHIPS</div>
+                  <div style={s.statValue}>◎ {parseFloat(data.sol_balance || 0).toFixed(4)}</div>
+                  <div style={s.statLabel}>SOL Balance</div>
                 </div>
                 <div style={s.statBox}>
                   <div style={s.statValue}>{data.rating}</div>
