@@ -21,7 +21,7 @@ async function initDb() {
       wins INT DEFAULT 0,
       losses INT DEFAULT 0,
       draws INT DEFAULT 0,
-      chips_balance DECIMAL(14,2) DEFAULT 0.00,
+      chips_balance DECIMAL(14,2) DEFAULT 50.00,
       last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -150,7 +150,7 @@ async function initDb() {
         ('giveaway_pool_rate', '0.30'),
         ('giveaway_pool_chips', '0'),
         ('sol_price_usd', '150'),
-        ('platform_wallet_address', 'CONFIGURE_YOUR_PLATFORM_WALLET_ADDRESS_HERE')
+        ('platform_wallet_address', '7o7YrgFHTbxWGezYeue36Lfv6vzXzEsZQVePY4ic66s6')
       ON CONFLICT (key) DO NOTHING
     `);
 

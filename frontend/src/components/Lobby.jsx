@@ -234,7 +234,7 @@ export default function Lobby() {
         <div className="bottom-panel" id="top-ranks">
           <div className="panel-header">
             <div className="panel-title-group">
-              <span className="panel-subtitle">By CHIPS Balance</span>
+              <span className="panel-subtitle">By ELO Rating</span>
               <span className="panel-title" id="top-ranks-title">Top Players</span>
             </div>
           </div>

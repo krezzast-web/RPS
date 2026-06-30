@@ -69,7 +69,7 @@ async function broadcastLobbyState() {
       `),
       db.query(`
         SELECT username, rating, wins, losses, draws, chips_balance, wallet_address
-        FROM players ORDER BY chips_balance DESC, rating DESC LIMIT 10
+        FROM players ORDER BY rating DESC, wins DESC LIMIT 10
       `),
       db.query(`
         SELECT

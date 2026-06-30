@@ -2104,3 +2104,588 @@ button, input {
   from { opacity: 0; transform: translateY(-8px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* ─────────────────────────────────────────────
+   Premium CHIPS Exchange Modal (Riot Style)
+   ───────────────────────────────────────────── */
+
+.deposit-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(6px);
+  animation: fade-in 0.2s ease-out;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.deposit-modal {
+  background: #0d0d12;
+  border: 1px solid #262635;
+  border-radius: 16px;
+  width: 580px;
+  max-width: 95vw;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 30px rgba(212, 255, 0, 0.03);
+  animation: scale-up 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes scale-up {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.deposit-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid #1e1e2a;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #111118;
+}
+
+.deposit-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.deposit-title-icon {
+  font-size: 20px;
+  color: var(--accent-color);
+  text-shadow: 0 0 10px var(--accent-glow);
+}
+
+.deposit-title {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 16px;
+  color: #ffffff;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+}
+
+.deposit-close-btn {
+  background: none;
+  border: none;
+  color: #555570;
+  font-size: 24px;
+  cursor: pointer;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+.deposit-close-btn:hover {
+  color: var(--text-primary);
+}
+
+.deposit-tabs {
+  display: flex;
+  background: #0b0b0f;
+  border-bottom: 1px solid #1e1e2a;
+}
+
+.deposit-tab {
+  flex: 1;
+  padding: 14px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  transition: all 0.2s;
+  border-bottom: 2px solid transparent;
+}
+
+.deposit-tab:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.deposit-tab.active {
+  color: var(--accent-color);
+  border-bottom-color: var(--accent-color);
+  background: rgba(212, 255, 0, 0.02);
+}
+
+.deposit-body {
+  padding: 24px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.deposit-intro {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  gap: 12px;
+}
+
+.deposit-intro p {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.exchange-rate-tag {
+  font-size: 10px;
+  color: var(--accent-color);
+  background: rgba(212, 255, 0, 0.08);
+  border: 1px solid rgba(212, 255, 0, 0.2);
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.deposit-loading {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 40px;
+  font-size: 13px;
+}
+
+/* Riot style grid */
+.riot-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 580px) {
+  .riot-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.riot-card {
+  background: #12121c;
+  border: 1px solid #222232;
+  border-radius: 12px;
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+  overflow: hidden;
+}
+
+.riot-card:hover {
+  border-color: #444460;
+  transform: translateY(-2px);
+  background: #151525;
+}
+
+.riot-card.selected {
+  border-color: var(--accent-color);
+  background: rgba(212, 255, 0, 0.03);
+  box-shadow: 0 0 20px rgba(212, 255, 0, 0.08);
+}
+
+.riot-card-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: #4ade80;
+  color: #000000;
+  font-size: 8px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-bottom-left-radius: 8px;
+  letter-spacing: 0.5px;
+}
+
+.riot-card-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.riot-chips-icon {
+  font-size: 18px;
+  color: var(--accent-color);
+}
+
+.riot-chips-amount {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 20px;
+  color: #ffffff;
+}
+
+.riot-card-label {
+  font-size: 9px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-top: 2px;
+  margin-bottom: 16px;
+}
+
+.riot-card-price {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 14px;
+  color: var(--accent-color);
+  background: rgba(212, 255, 0, 0.05);
+  border: 1px solid rgba(212, 255, 0, 0.15);
+  width: 100%;
+  text-align: center;
+  padding: 6px 0;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.riot-card.selected .riot-card-price {
+  background: var(--accent-color);
+  color: #000000;
+  border-color: var(--accent-color);
+}
+
+.riot-card-fee {
+  font-size: 8px;
+  color: var(--text-muted);
+  margin-top: 8px;
+  text-transform: uppercase;
+}
+
+.btn-deposit-proceed {
+  width: 100%;
+  background: var(--accent-color);
+  color: #000000;
+  border: none;
+  border-radius: 8px;
+  padding: 14px;
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 13px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  box-shadow: 0 4px 15px rgba(212, 255, 0, 0.2);
+  transition: all 0.2s;
+}
+
+.btn-deposit-proceed:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(212, 255, 0, 0.4);
+}
+
+/* Instructions Step */
+.deposit-instructions {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.instruction-step-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.step-number {
+  background: var(--accent-color);
+  color: #000000;
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 12px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.instruction-step-header p {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.platform-wallet-box {
+  background: #11111a;
+  border: 1px solid #222232;
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wallet-box-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 1px;
+}
+
+.network-pill {
+  color: var(--accent-color);
+  background: rgba(212, 255, 0, 0.05);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.wallet-address-display {
+  font-family: monospace;
+  font-size: 13px;
+  color: var(--accent-color);
+  background: #0b0b10;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid #1c1c28;
+  word-break: break-all;
+}
+
+.btn-copy-address {
+  background: #1e1e2d;
+  border: 1px solid #2d2d42;
+  color: #ffffff;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+  align-self: flex-start;
+}
+
+.btn-copy-address:hover {
+  background: #28283c;
+  border-color: #444460;
+}
+
+.instruction-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(255,255,255,0.01);
+  padding: 14px;
+  border-radius: 8px;
+  border-left: 2px solid var(--accent-color);
+}
+
+.note-item {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.note-bullet {
+  color: var(--accent-color);
+  font-weight: bold;
+}
+
+.btn-instruction-back {
+  background: none;
+  border: 1px solid #222232;
+  color: var(--text-secondary);
+  border-radius: 8px;
+  padding: 12px 20px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-instruction-back:hover {
+  border-color: #444460;
+  color: var(--text-primary);
+}
+
+/* ── Withdraw CSS ── */
+.withdraw-section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.withdraw-info-card {
+  background: #11111a;
+  border: 1px solid #222232;
+  border-radius: 10px;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.withdraw-info-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.withdraw-info-row strong {
+  font-family: var(--font-heading);
+}
+
+.withdraw-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.withdraw-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.withdraw-input-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.withdraw-input-wrapper {
+  display: flex;
+  gap: 8px;
+}
+
+.withdraw-input {
+  flex: 1;
+  background: #12121c;
+  border: 1px solid #222232;
+  border-radius: 6px;
+  padding: 12px 14px;
+  color: #ffffff;
+  font-size: 14px;
+  outline: none;
+  font-family: var(--font-heading);
+  font-weight: 700;
+  transition: border-color 0.15s;
+}
+
+.withdraw-input:focus {
+  border-color: var(--accent-color);
+}
+
+.btn-withdraw-max {
+  background: #1e1e2d;
+  border: 1px solid #2d2d42;
+  color: var(--accent-color);
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 11px;
+  padding: 0 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-withdraw-max:hover {
+  background: rgba(212, 255, 0, 0.05);
+}
+
+.withdraw-preview-card {
+  background: rgba(255, 255, 255, 0.01);
+  border: 1px solid #1c1c28;
+  border-radius: 8px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.preview-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.preview-row.total {
+  border-top: 1px solid #1c1c28;
+  padding-top: 6px;
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.btn-withdraw-submit {
+  width: 100%;
+  background: var(--accent-color);
+  color: #000000;
+  border: none;
+  border-radius: 8px;
+  padding: 14px;
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 13px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  transition: all 0.2s;
+}
+
+.btn-withdraw-submit:hover:not(:disabled) {
+  box-shadow: 0 0 15px rgba(212, 255, 0, 0.3);
+}
+
+.btn-withdraw-submit:disabled {
+  background: #1e1e24;
+  color: #555560;
+  cursor: not-allowed;
+}
+
+.withdraw-result-alert {
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.withdraw-result-alert.success {
+  background: rgba(74, 222, 128, 0.08);
+  border: 1px solid rgba(74, 222, 128, 0.2);
+  color: #4ade80;
+}
+
+.withdraw-result-alert.error {
+  background: rgba(248, 113, 113, 0.08);
+  border: 1px solid rgba(248, 113, 113, 0.2);
+  color: #f87171;
+}
+
+.alert-content {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.alert-icon {
+  font-size: 16px;
+  font-weight: bold;
+}
+

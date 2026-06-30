@@ -60,37 +60,11 @@ export const GameProvider = ({ children }) => {
   const [usersInRoom] = useState([]);
 
   const socketRef = useRef(null);
-  // Keep walletAddress in a ref so async socket closures always see the latest value
   const walletRef = useRef('');
 
-  const connectWallet = async () => {
-    try {
-      const isPhantom = window.solana && window.solana.isPhantom;
-      const isSolflare = window.solflare && window.solflare.isSolflare;
-
-      if (!isPhantom && !isSolflare) {
-        alert("Solana wallet not found! Please install Phantom Wallet (https://phantom.app) or Solflare to play.");
-        window.open("https://phantom.app", "_blank");
-        return;
-      }
-
-      const provider = isPhantom ? window.solana : window.solflare;
-      const resp = await provider.connect();
-      const pubKey = resp.publicKey.toString();
-
-      walletRef.current = pubKey;
-      setWalletAddress(pubKey);
-      setWalletConnected(true);
-
-      const socketUrl = window.location.origin.includes('localhost')
-        ? 'http://localhost:5000'
-        : window.location.origin;
-      const socket = io(socketUrl);
-      socketRef.current = socket;
-
-      socket.emit('join_lobby', pubKey);
-
-    // Profile sync from server — clears fake initial values
+  // Setup all socket event listeners in a reusable way
+  const setupSocketListeners = (socket) => {
+    // Profile sync from server
     socket.on('profile_sync', (profile) => {
       setUsername(profile.username);
       setRpsRating(profile.rating);
@@ -161,12 +135,8 @@ export const GameProvider = ({ children }) => {
     });
 
     socket.on('ready_status', (status) => {
-      // Determine which player we are based on walletRef (avoids stale closure)
-      // We store player1Wallet in activeRoom but it may not be set yet
-      // The server sends both flags; we check which wallet is ours
-      setUserReady(status.player1Ready);   // will be corrected by isPlayer1 check below
+      setUserReady(status.player1Ready);
       setOpponentReady(status.player2Ready);
-      // Since we don't know order yet without activeRoom, the UI just shows both states
     });
 
     socket.on('timer_sync', (timer) => {
@@ -189,12 +159,7 @@ export const GameProvider = ({ children }) => {
     });
 
     socket.on('round_resolved', (resolution) => {
-      // Determine player position from the room data in ref
-      // We use walletRef to avoid stale closure
       const myWallet = walletRef.current;
-      // We don't know p1/p2 here without activeRoom ref — use resolution data
-      // The server sends player1Move and player2Move; we identify ours via the room_sync data
-      // For now we track position in a separate ref updated on room_sync
       const isP1 = currentRoomPlayer1WalletRef.current === myWallet;
 
       const myMove = isP1 ? resolution.player1Move : resolution.player2Move;
@@ -257,10 +222,54 @@ export const GameProvider = ({ children }) => {
     socket.on('join_error', (err) => {
       alert(`Could not join room: ${err}`);
     });
+  };
+
+  // Initialize socket on mount so guests can view the lobby instantly
+  React.useEffect(() => {
+    const socketUrl = window.location.origin.includes('localhost')
+      ? 'http://localhost:5000'
+      : window.location.origin;
+    const socket = io(socketUrl);
+    socketRef.current = socket;
+
+    setupSocketListeners(socket);
+
+    // Join lobby as guest initially
+    socket.emit('join_lobby', null);
+
+    return () => {
+      socket.disconnect();
+    };
+  }, []);
+
+  const connectWallet = async () => {
+    try {
+      const isPhantom = window.solana && window.solana.isPhantom;
+      const isSolflare = window.solflare && window.solflare.isSolflare;
+
+      if (!isPhantom && !isSolflare) {
+        alert("Solana wallet not found! Please install Phantom Wallet (https://phantom.app) or Solflare to play.");
+        window.open("https://phantom.app", "_blank");
+        return;
+      }
+
+      const provider = isPhantom ? window.solana : window.solflare;
+      const resp = await provider.connect();
+      const pubKey = resp.publicKey.toString();
+
+      walletRef.current = pubKey;
+      setWalletAddress(pubKey);
+      setWalletConnected(true);
+
+      // Upgrade socket session to authenticated wallet
+      if (socketRef.current) {
+        socketRef.current.emit('join_lobby', pubKey);
+      }
     } catch (err) {
       console.error("Wallet connection failed:", err);
     }
   };
+
 
   // Ref to track player1 wallet of the current room (solves stale closure in round_resolved)
   const currentRoomPlayer1WalletRef = useRef('');
