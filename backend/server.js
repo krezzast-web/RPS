@@ -538,7 +538,13 @@ app.get('/api/config/deposit-tiers', async (_req, res) => {
       bonusPct: Math.round(t.bonusPct * 100),
       feeChips: Math.round(t.baseChips * depositFee)
     }));
-    res.json({ tiers, chipsPerSol, depositFee, withdrawFee: parseFloat(config.withdraw_fee_rate || 0.05) });
+    res.json({
+      tiers,
+      chipsPerSol,
+      depositFee,
+      withdrawFee: parseFloat(config.withdraw_fee_rate || 0.05),
+      platformWallet: config.platform_wallet_address || 'CONFIGURE_YOUR_PLATFORM_WALLET_ADDRESS_HERE'
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

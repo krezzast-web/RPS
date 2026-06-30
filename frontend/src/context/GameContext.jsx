@@ -63,19 +63,32 @@ export const GameProvider = ({ children }) => {
   // Keep walletAddress in a ref so async socket closures always see the latest value
   const walletRef = useRef('');
 
-  const connectWallet = () => {
-    const mockWallet = 'Haku' + Math.random().toString(36).substring(2, 8).toUpperCase() + '324';
-    walletRef.current = mockWallet;
-    setWalletAddress(mockWallet);
-    setWalletConnected(true);
+  const connectWallet = async () => {
+    try {
+      const isPhantom = window.solana && window.solana.isPhantom;
+      const isSolflare = window.solflare && window.solflare.isSolflare;
 
-    const socketUrl = window.location.origin.includes('localhost')
-      ? 'http://localhost:5000'
-      : window.location.origin;
-    const socket = io(socketUrl);
-    socketRef.current = socket;
+      if (!isPhantom && !isSolflare) {
+        alert("Solana wallet not found! Please install Phantom Wallet (https://phantom.app) or Solflare to play.");
+        window.open("https://phantom.app", "_blank");
+        return;
+      }
 
-    socket.emit('join_lobby', mockWallet);
+      const provider = isPhantom ? window.solana : window.solflare;
+      const resp = await provider.connect();
+      const pubKey = resp.publicKey.toString();
+
+      walletRef.current = pubKey;
+      setWalletAddress(pubKey);
+      setWalletConnected(true);
+
+      const socketUrl = window.location.origin.includes('localhost')
+        ? 'http://localhost:5000'
+        : window.location.origin;
+      const socket = io(socketUrl);
+      socketRef.current = socket;
+
+      socket.emit('join_lobby', pubKey);
 
     // Profile sync from server — clears fake initial values
     socket.on('profile_sync', (profile) => {
@@ -244,6 +257,9 @@ export const GameProvider = ({ children }) => {
     socket.on('join_error', (err) => {
       alert(`Could not join room: ${err}`);
     });
+    } catch (err) {
+      console.error("Wallet connection failed:", err);
+    }
   };
 
   // Ref to track player1 wallet of the current room (solves stale closure in round_resolved)

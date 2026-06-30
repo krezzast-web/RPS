@@ -149,7 +149,8 @@ async function initDb() {
         ('game_fee_rate', '0.02'),
         ('giveaway_pool_rate', '0.30'),
         ('giveaway_pool_chips', '0'),
-        ('sol_price_usd', '150')
+        ('sol_price_usd', '150'),
+        ('platform_wallet_address', 'CONFIGURE_YOUR_PLATFORM_WALLET_ADDRESS_HERE')
       ON CONFLICT (key) DO NOTHING
     `);
 

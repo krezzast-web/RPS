@@ -11,15 +11,18 @@ export default function Deposit({ onClose }) {
   const [withdrawResult, setWithdrawResult] = useState(null);
   const [withdrawLoading, setWithdrawLoading] = useState(false);
 
+  const [platformWallet, setPlatformWallet] = useState('');
+
   useEffect(() => {
     fetch('/api/config/deposit-tiers')
       .then(r => r.json())
-      .then(d => { setTiers(d.tiers || []); setLoading(false); })
+      .then(d => {
+        setTiers(d.tiers || []);
+        setPlatformWallet(d.platformWallet || 'CONFIGURE_YOUR_PLATFORM_WALLET_ADDRESS_HERE');
+        setLoading(false);
+      })
       .catch(() => setLoading(false));
   }, []);
-
-  // Platform Solana wallet (placeholder — you'll set your real wallet here)
-  const PLATFORM_WALLET = 'CONFIGURE_YOUR_PLATFORM_WALLET_ADDRESS_HERE';
 
   const handleWithdraw = async (e) => {
     e.preventDefault();
@@ -129,10 +132,10 @@ export default function Deposit({ onClose }) {
                   </div>
                   <div style={styles.walletBox}>
                     <span style={{ fontSize: '10px', color: '#555', textTransform: 'uppercase', letterSpacing: '1px' }}>Platform Wallet Address (Solana)</span>
-                    <span style={styles.walletAddr}>{PLATFORM_WALLET}</span>
+                    <span style={styles.walletAddr}>{platformWallet}</span>
                     <button
                       style={{ background: '#262626', border: 'none', color: '#d4ff00', padding: '6px 12px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', fontWeight: 700, alignSelf: 'flex-start' }}
-                      onClick={() => navigator.clipboard.writeText(PLATFORM_WALLET)}
+                      onClick={() => navigator.clipboard.writeText(platformWallet)}
                     >
                       Copy Address
                     </button>
