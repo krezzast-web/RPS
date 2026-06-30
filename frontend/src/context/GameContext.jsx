@@ -234,8 +234,16 @@ export const GameProvider = ({ children }) => {
 
     setupSocketListeners(socket);
 
-    // Join lobby as guest initially
-    socket.emit('join_lobby', null);
+    // Auto-reconnect if previously connected
+    const savedWallet = localStorage.getItem('rps_wallet_address');
+    if (savedWallet) {
+      walletRef.current = savedWallet;
+      setWalletAddress(savedWallet);
+      setWalletConnected(true);
+      socket.emit('join_lobby', savedWallet);
+    } else {
+      socket.emit('join_lobby', null);
+    }
 
     return () => {
       socket.disconnect();
@@ -260,6 +268,7 @@ export const GameProvider = ({ children }) => {
       walletRef.current = pubKey;
       setWalletAddress(pubKey);
       setWalletConnected(true);
+      localStorage.setItem('rps_wallet_address', pubKey);
 
       // Upgrade socket session to authenticated wallet
       if (socketRef.current) {
@@ -295,16 +304,17 @@ export const GameProvider = ({ children }) => {
   };
 
   const disconnectWallet = () => {
+    localStorage.removeItem('rps_wallet_address');
     if (socketRef.current) {
-      socketRef.current.disconnect();
-      socketRef.current = null;
+      // Don't fully disconnect socket, just re-join as guest so lobby updates continue!
+      setWalletConnected(false);
+      setWalletAddress('');
+      setChipsBalance(0);
+      setActiveView('lobby');
+      setActiveRoom(null);
+      walletRef.current = '';
+      socketRef.current.emit('join_lobby', null);
     }
-    setWalletConnected(false);
-    setWalletAddress('');
-    setChipsBalance(0);
-    setActiveView('lobby');
-    setActiveRoom(null);
-    walletRef.current = '';
   };
 
   const setPlayerReady = () => {

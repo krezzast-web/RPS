@@ -150,9 +150,12 @@ io.on('connection', (socket) => {
   let currentRoomId = '';
 
   socket.on('join_lobby', async (wallet) => {
-    if (!wallet) return;
-    userWallet = wallet;
     socket.join('lobby');
+    if (!wallet) {
+      broadcastLobbyState();
+      return;
+    }
+    userWallet = wallet;
 
     const defaultUsername = `Player_${wallet.substring(0, 6)}`;
     try {
@@ -523,27 +526,29 @@ app.post('/api/profile/username', async (req, res) => {
 app.get('/api/config/deposit-tiers', async (_req, res) => {
   try {
     const config = await getConfig();
-    const chipsPerSol = parseFloat(config.chips_per_sol || 1000);
     const depositFee = parseFloat(config.deposit_fee_rate || 0.03);
+    
+    // Exact Riot Games RP equivalent bundles mapped to SOL values
     const tiers = [
-      { sol: 0.1,  baseChips: 0.1  * chipsPerSol, bonusPct: 0.00 },
-      { sol: 0.5,  baseChips: 0.5  * chipsPerSol, bonusPct: 0.05 },
-      { sol: 1.0,  baseChips: 1.0  * chipsPerSol, bonusPct: 0.10 },
-      { sol: 2.5,  baseChips: 2.5  * chipsPerSol, bonusPct: 0.18 },
-      { sol: 5.0,  baseChips: 5.0  * chipsPerSol, bonusPct: 0.25 },
-      { sol: 10.0, baseChips: 10.0 * chipsPerSol, bonusPct: 0.35 },
+      { sol: 0.03, totalChips: 575,   bonusPct: 0 },
+      { sol: 0.07, totalChips: 1380,  bonusPct: 20 },
+      { sol: 0.13, totalChips: 2800,  bonusPct: 22 },
+      { sol: 0.23, totalChips: 5000,  bonusPct: 24 },
+      { sol: 0.33, totalChips: 7200,  bonusPct: 25 },
+      { sol: 0.67, totalChips: 15000, bonusPct: 30 },
     ].map(t => ({
       sol: t.sol,
-      totalChips: Math.round(t.baseChips * (1 + t.bonusPct)),
-      bonusPct: Math.round(t.bonusPct * 100),
-      feeChips: Math.round(t.baseChips * depositFee)
+      totalChips: t.totalChips,
+      bonusPct: t.bonusPct,
+      feeChips: Math.round(t.totalChips * depositFee)
     }));
+    
     res.json({
       tiers,
-      chipsPerSol,
+      chipsPerSol: parseFloat(config.chips_per_sol || 1000),
       depositFee,
       withdrawFee: parseFloat(config.withdraw_fee_rate || 0.05),
-      platformWallet: config.platform_wallet_address || 'CONFIGURE_YOUR_PLATFORM_WALLET_ADDRESS_HERE'
+      platformWallet: config.platform_wallet_address || '7o7YrgFHTbxWGezYeue36Lfv6vzXzEsZQVePY4ic66s6'
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
