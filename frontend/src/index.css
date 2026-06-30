@@ -371,8 +371,8 @@ button, input {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  background: #1a1a1a;
-  border: 1px solid #2a2a2a;
+  background: #1D1D1D;
+  border: 1px solid #333333;
   border-radius: 8px;
   min-width: 160px;
   z-index: 500;
@@ -461,11 +461,11 @@ button, input {
 
 /* Page Layout: Lobby */
 .lobby-container {
-  padding: 20px 24px;
+  padding: 20px;
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 20px;
   overflow-y: auto;
   width: 100%;
 }
@@ -480,7 +480,7 @@ button, input {
 
 .stats-grid {
   display: flex;
-  gap: 24px;
+  gap: 20px;
 }
 
 .stat-item {
@@ -518,7 +518,7 @@ button, input {
 .room-tiers-row {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
-  gap: 24px;
+  gap: 20px;
   width: 100%;
 }
 
@@ -672,11 +672,15 @@ button, input {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 11px;
+  font-size: 9.5px;
+  font-weight: 500;
   color: var(--text-secondary);
   border-top: 1px solid var(--border-color);
-  padding-top: 10px;
+  padding-top: 8px;
   margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  letter-spacing: -0.2px;
 }
 
 .divider-dot {
@@ -688,7 +692,7 @@ button, input {
 .lobby-bottom-grid {
   display: grid;
   grid-template-columns: 1.2fr 1fr 0.8fr;
-  gap: 24px;
+  gap: 20px;
 }
 
 @media (max-width: 1024px) {
@@ -701,7 +705,7 @@ button, input {
   background-color: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: 4px;
-  padding: 16px;
+  padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1151,7 +1155,7 @@ button, input {
 }
 
 .player-rank-badge {
-  background: linear-gradient(135deg, #d4ff00 0%, #a3ff00 100%);
+  background: linear-gradient(135deg, #DFFE00 0%, #DFFE00 100%);
   color: #000000;
   font-family: var(--font-heading);
   font-weight: 800;
@@ -1714,7 +1718,7 @@ button, input {
   display: flex;
   padding: 8px 8px 0 8px;
   border-bottom: 1px solid var(--border-color);
-  background-color: #151515;
+  background-color: #1D1D1D;
   flex-shrink: 0;
   gap: 4px;
 }
@@ -1727,7 +1731,7 @@ button, input {
   font-weight: 700;
   text-transform: uppercase;
   color: #888888;
-  background-color: #1a1a1a;
+  background-color: #1D1D1D;
   border: 1px solid var(--border-color);
   border-bottom: none;
   border-radius: 4px 4px 0 0;
@@ -1737,7 +1741,7 @@ button, input {
 
 .chat-tab:hover {
   color: var(--text-primary);
-  background-color: #252525;
+  background-color: #1D1D1D;
 }
 
 .chat-tab.active {
@@ -2216,8 +2220,8 @@ button, input {
 
 .deposit-tabs {
   display: flex;
-  background: #0b0b0f;
-  border-bottom: 1px solid #1e1e2a;
+  background: #1D1D1D;
+  border-bottom: 1px solid #333333;
 }
 
 .deposit-tab {
@@ -2301,7 +2305,7 @@ button, input {
 }
 
 .riot-card {
-  background: #12121c;
+  background: #1D1D1D;
   border: 1px solid #222232;
   border-radius: 12px;
   padding: 20px 16px;
@@ -2317,7 +2321,7 @@ button, input {
 .riot-card:hover {
   border-color: #444460;
   transform: translateY(-2px);
-  background: #151525;
+  background: #1D1D1D;
 }
 
 .riot-card.selected {
@@ -2451,8 +2455,8 @@ button, input {
 }
 
 .platform-wallet-box {
-  background: #11111a;
-  border: 1px solid #222232;
+  background: #1D1D1D;
+  border: 1px solid #333333;
   border-radius: 10px;
   padding: 16px;
   display: flex;
@@ -2480,16 +2484,16 @@ button, input {
   font-family: monospace;
   font-size: 13px;
   color: var(--accent-color);
-  background: #0b0b10;
+  background: #1D1D1D;
   padding: 10px 12px;
   border-radius: 6px;
-  border: 1px solid #1c1c28;
+  border: 1px solid #333333;
   word-break: break-all;
 }
 
 .btn-copy-address {
-  background: #1e1e2d;
-  border: 1px solid #2d2d42;
+  background: #1D1D1D;
+  border: 1px solid #333333;
   color: #ffffff;
   border-radius: 6px;
   padding: 8px 14px;
@@ -2501,7 +2505,7 @@ button, input {
 }
 
 .btn-copy-address:hover {
-  background: #28283c;
+  background: #1D1D1D;
   border-color: #444460;
 }
 
@@ -2553,8 +2557,8 @@ button, input {
 }
 
 .withdraw-info-card {
-  background: #11111a;
-  border: 1px solid #222232;
+  background: #1D1D1D;
+  border: 1px solid #333333;
   border-radius: 10px;
   padding: 14px 18px;
   display: flex;
@@ -2599,7 +2603,7 @@ button, input {
 
 .withdraw-input {
   flex: 1;
-  background: #12121c;
+  background: #1D1D1D;
   border: 1px solid #222232;
   border-radius: 6px;
   padding: 12px 14px;
@@ -2616,8 +2620,8 @@ button, input {
 }
 
 .btn-withdraw-max {
-  background: #1e1e2d;
-  border: 1px solid #2d2d42;
+  background: #1D1D1D;
+  border: 1px solid #333333;
   color: var(--accent-color);
   font-family: var(--font-heading);
   font-weight: 800;
@@ -2634,7 +2638,7 @@ button, input {
 
 .withdraw-preview-card {
   background: rgba(255, 255, 255, 0.01);
-  border: 1px solid #1c1c28;
+  border: 1px solid #333333;
   border-radius: 8px;
   padding: 12px 16px;
   display: flex;
@@ -2650,7 +2654,7 @@ button, input {
 }
 
 .preview-row.total {
-  border-top: 1px solid #1c1c28;
+  border-top: 1px solid #333333;
   padding-top: 6px;
   margin-top: 4px;
   font-size: 13px;
@@ -2679,7 +2683,7 @@ button, input {
 }
 
 .btn-withdraw-submit:disabled {
-  background: #1e1e24;
+  background: #1D1D1D;
   color: #555560;
   cursor: not-allowed;
 }

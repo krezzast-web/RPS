@@ -178,7 +178,20 @@ async function broadcastLobbyState() {
                  SELECT COUNT(*) FROM matches m
                  WHERE m.room_id LIKE 'tier_' || rt.id || '\\_%' ESCAPE '\\'
                    AND m.played_at >= NOW() - INTERVAL '10 minutes'
-               ), 0) / 10.0 as games_per_min
+               ), 0) / 10.0 as games_per_min,
+               (
+                 SELECT json_agg(coalesce(mc.cnt, 0))
+                 FROM (
+                   SELECT gs.m, (
+                     SELECT count(*) FROM matches m2
+                     WHERE m2.room_id LIKE 'tier_' || rt.id || '\\_%' ESCAPE '\\'
+                       AND m2.played_at >= NOW() - (gs.m + 1) * INTERVAL '1 minute'
+                       AND m2.played_at < NOW() - gs.m * INTERVAL '1 minute'
+                   ) as cnt
+                   FROM generate_series(0, 9) gs(m)
+                   ORDER BY gs.m DESC
+                 ) mc
+               ) as chart_data
         FROM room_tiers rt
         WHERE rt.is_active = TRUE
         ORDER BY rt.display_order ASC
@@ -227,7 +240,8 @@ async function broadcastLobbyState() {
         display_order: t.display_order,
         active_players: parseInt(t.active_players || 0),
         games_played: parseInt(t.games_played || 0),
-        games_per_min: parseFloat(t.games_per_min || 0)
+        games_per_min: parseFloat(t.games_per_min || 0),
+        chart_data: t.chart_data || [0,0,0,0,0,0,0,0,0,0]
       })),
       chatMessages: generalMsgRes.rows
     };

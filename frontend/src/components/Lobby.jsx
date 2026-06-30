@@ -108,52 +108,56 @@ export default function Lobby() {
           <div className="room-tiers-loading">Loading rooms…</div>
         ) : (
           <div className="room-tiers-row">
-            {displayTiers.map((tier) => (
-              <div
-                key={tier.id}
-                className={`room-card ${tier.is_ranked ? 'ranked' : ''}`}
-                id={`room-card-${tier.id}`}
-              >
-                <div className="room-card-header">
-                  <div>
-                    <div className="room-type">{tier.is_ranked ? '⭐ Ranked' : 'Casual'}</div>
-                    <div className="room-title">{tier.title}</div>
-                  </div>
-                  {tier.is_ranked && (
-                    <div className="ranked-badge">RANK</div>
-                  )}
-                </div>
-
-                <div className="mini-chart-container-wrapper">
-                  <div className="mini-chart-header">
-                    <span>ACTIVE PLAYERS PER MIN</span>
-                    <span>{tier.games_per_min || 0}</span>
-                  </div>
-                  <div className="mini-chart-container">
-                    {[40, 60, 35, 80, 55, 70, 45, 90, 50, 65].map((h, i) => (
-                      <div key={i} className="chart-bar" style={{ height: `${h}%` }} />
-                    ))}
-                  </div>
-                </div>
-
-                <div className="room-card-line-stats">
-                  <span>Players: <strong>{tier.active_players || 0}</strong></span>
-                  <span className="divider-dot">·</span>
-                  <span style={{ display: 'inline-flex', alignItems: 'center' }}>Price: <strong style={{ color: 'var(--accent-color)', marginLeft: '4px', display: 'inline-flex', alignItems: 'center' }}><SolanaIcon size={10} style={{ marginRight: '2px' }} /> {parseFloat(tier.bet_sol).toFixed(2)} SOL</strong></span>
-                  <span className="divider-dot">·</span>
-                  <span>Fee: <strong>{(parseFloat(tier.fee_rate) * 100).toFixed(0)}%</strong></span>
-                  <span className="divider-dot">·</span>
-                  <span>Games: <strong>{tier.games_played || 0}</strong></span>
-                </div>
-
-                <button
-                  className={`btn-play-card ${tier.is_ranked ? 'ranked-btn' : ''}`}
-                  onClick={() => handleJoinTier(tier)}
+            {displayTiers.map((tier) => {
+              const chartData = tier.chart_data || [0,0,0,0,0,0,0,0,0,0];
+              const maxVal = Math.max(...chartData, 1);
+              return (
+                <div
+                  key={tier.id}
+                  className={`room-card ${tier.is_ranked ? 'ranked' : ''}`}
+                  id={`room-card-${tier.id}`}
                 >
-                  PLAY NOW
-                </button>
-              </div>
-            ))}
+                  <div className="room-card-header">
+                    <div>
+                      <div className="room-type">{tier.is_ranked ? 'Ranked' : 'Casual'}</div>
+                      <div className="room-title">{tier.title}</div>
+                    </div>
+                    {tier.is_ranked && (
+                      <div className="ranked-badge">RANK</div>
+                    )}
+                  </div>
+
+                  <div className="mini-chart-container-wrapper">
+                    <div className="mini-chart-header">
+                      <span>ACTIVE PLAYERS PER MIN</span>
+                      <span>{tier.games_per_min || 0}</span>
+                    </div>
+                    <div className="mini-chart-container">
+                      {chartData.map((h, i) => (
+                        <div key={i} className="chart-bar" style={{ height: `${h > 0 ? Math.max((h / maxVal) * 100, 15) : 0}%` }} title={`${h} games`} />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="room-card-line-stats">
+                    <span>Players: <strong>{tier.active_players || 0}</strong></span>
+                    <span className="divider-dot">·</span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>Price: <strong style={{ color: 'var(--accent-color)', marginLeft: '4px', display: 'inline-flex', alignItems: 'center' }}><SolanaIcon size={10} style={{ marginRight: '2px' }} /> {parseFloat(tier.bet_sol).toFixed(2)} SOL</strong></span>
+                    <span className="divider-dot">·</span>
+                    <span>Fee: <strong>{(parseFloat(tier.fee_rate) * 100).toFixed(0)}%</strong></span>
+                    <span className="divider-dot">·</span>
+                    <span>Games: <strong>{tier.games_played || 0}</strong></span>
+                  </div>
+
+                  <button
+                    className={`btn-play-card ${tier.is_ranked ? 'ranked-btn' : ''}`}
+                    onClick={() => handleJoinTier(tier)}
+                  >
+                    PLAY NOW
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -288,7 +292,7 @@ export default function Lobby() {
                 <div key={gw.id} className="giveaway-row">
                   <div className="giveaway-info">
                     <span className="giveaway-title">
-                      {isEndingSoon(gw.end_date) && <span style={{ color: '#f87171', marginRight: '4px' }}>⚡</span>}
+                      {isEndingSoon(gw.end_date) && <span style={{ color: '#f87171', marginRight: '4px', fontWeight: 'bold' }}>[ENDING SOON] </span>}
                       {gw.title}
                     </span>
                     <span className="giveaway-meta" style={{ display: 'inline-flex', alignItems: 'center' }}>
@@ -305,9 +309,9 @@ export default function Lobby() {
           {giveawayHistoryOpen && (
             <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               onClick={() => setGiveawayHistoryOpen(false)}>
-              <div style={{ background: '#111116', border: '1px solid #262626', borderRadius: '12px', width: '420px', maxWidth: '95vw', maxHeight: '80vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+              <div style={{ background: '#1D1D1D', border: '1px solid #333333', borderRadius: '12px', width: '420px', maxWidth: '95vw', maxHeight: '80vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
                 onClick={e => e.stopPropagation()}>
-                <div style={{ padding: '16px 20px', borderBottom: '1px solid #1e1e1e', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ padding: '16px 20px', borderBottom: '1px solid #333333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: '14px', textTransform: 'uppercase' }}>Giveaway Winners History</span>
                   <button style={{ background: 'none', border: 'none', color: '#666', fontSize: '18px', cursor: 'pointer' }} onClick={() => setGiveawayHistoryOpen(false)}>×</button>
                 </div>

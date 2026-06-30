@@ -56,7 +56,7 @@ export default function Profile({ wallet, onClose }) {
     sectionTitle: { fontSize: '11px', color: '#555', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px', marginTop: '16px' }
   };
 
-  const moveEmoji = (m) => m === 'R' ? '🪨' : m === 'P' ? '📄' : m === 'S' ? '✂️' : '—';
+  const moveEmoji = (m) => m === 'R' ? 'R' : m === 'P' ? 'P' : m === 'S' ? 'S' : '—';
 
   return (
     <div style={s.overlay} onClick={onClose}>

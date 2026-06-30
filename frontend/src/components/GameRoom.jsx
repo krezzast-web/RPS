@@ -72,17 +72,17 @@ export default function GameRoom() {
   // Helper to render hands emojis based on selection and state
   const getHandEmoji = (selection) => {
     if (matchmakingState === 'cooldown_3s') {
-      return '✊'; // Keep fist closed while shaking
+      return 'READY';
     }
     if (matchmakingState === 'playing_10s') {
-      return '✊'; // Keep closed while choosing
+      return 'CHOOSING';
     }
     if (matchmakingState === 'round_resolved' && selection) {
-      if (selection === 'R') return '✊';
-      if (selection === 'P') return '✋';
-      if (selection === 'S') return '✌️';
+      if (selection === 'R') return 'ROCK';
+      if (selection === 'P') return 'PAPER';
+      if (selection === 'S') return 'SCISSORS';
     }
-    return '✊'; // Default waiting fist
+    return 'WAITING';
   };
 
   const getMoveIcon = (move) => {
@@ -453,7 +453,7 @@ export default function GameRoom() {
                     onClick={() => likeMessage(msg.id)}
                     aria-label="Like message"
                   >
-                    ❤️ <span style={{ marginLeft: '2px', fontSize: '9px' }}>{msg.likes}</span>
+                    ♥ <span style={{ marginLeft: '2px', fontSize: '9px' }}>{msg.likes}</span>
                   </button>
                 )}
               </div>

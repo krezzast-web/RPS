@@ -67,17 +67,6 @@ function GameApp() {
             <line x1="5" y1="12" x2="19" y2="12"></line>
           </svg>
         </button>
-        {walletConnected && (
-          <button
-            className="sidebar-btn"
-            onClick={() => setDepositOpen(true)}
-            aria-label="Deposit SOL"
-            title="Deposit SOL"
-            style={{ color: 'var(--accent-color)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          >
-            <SolanaIcon size={14} />
-          </button>
-        )}
       </nav>
 
       {/* Main Content */}
