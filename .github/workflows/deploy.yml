@@ -1,4 +1,4 @@
-name: Build and Deploy Original RPS Game Lobby to EC2
+name: Build and Deploy Real-Time Multiplayer RPS to EC2
 
 on:
   push:
@@ -9,6 +9,21 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:15
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_DB: rps_db
+          POSTGRES_USER: rps_user
+          POSTGRES_PASSWORD: rps_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -18,20 +33,37 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+          cache-dependency-path: |
+            frontend/package-lock.json
+            backend/package-lock.json
 
       - name: Install Dependencies
         run: |
-          npm ci
+          cd backend && npm install
+          cd ../frontend && npm ci
 
-      - name: Code Quality - Run Linter
+      - name: Code Quality - Run Linters
         run: |
-          npm run lint
+          cd backend && npm run lint
+          cd ../frontend && npm run lint
 
-      - name: Build React Application
+      - name: Run Backend Integration Tests (Jest)
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: rps_user
+          DB_PASSWORD: rps_password
+          DB_NAME: rps_db
         run: |
+          cd backend
+          npm run test
+
+      - name: Build Frontend Application
+        run: |
+          cd frontend
           npm run build
 
-      - name: Deploy static assets to EC2 via SSH
+      - name: Deploy assets to EC2 via SSH
         env:
           PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
           HOST: ${{ secrets.EC2_HOST }}
@@ -46,14 +78,24 @@ jobs:
           echo -e "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile=/dev/null" > ~/.ssh/config
 
           # Prepare directories on the EC2 server
-          ssh $USER@$HOST "mkdir -p ~/app/dist"
+          ssh $USER@$HOST "mkdir -p ~/app/backend ~/app/frontend/dist"
 
-          # Transfer React build artifacts and Nginx configuration file
-          scp -r dist/* $USER@$HOST:~/app/dist/
+          # Transfer files (excluding node_modules)
+          scp backend/package.json backend/package-lock.json backend/server.js backend/db.js backend/server.test.js $USER@$HOST:~/app/backend/
+          scp -r frontend/dist/* $USER@$HOST:~/app/frontend/dist/
           scp .github/nginx.conf $USER@$HOST:~/app/nginx.conf
 
-          # Apply Nginx configuration and restart service
+          # Apply Nginx settings, install production modules, and reload PM2
           ssh $USER@$HOST "
             sudo mv ~/app/nginx.conf /etc/nginx/sites-available/default
             sudo systemctl restart nginx
+            
+            cd ~/app/backend
+            npm install --production
+            pm2 restart rps-backend || pm2 start server.js --name rps-backend
+            pm2 save
+            
+            # Reset permissions on home folder to ensure Nginx read traversal permissions
+            sudo chmod +x /home/ubuntu
+            sudo chmod -R 755 /home/ubuntu/app
           "

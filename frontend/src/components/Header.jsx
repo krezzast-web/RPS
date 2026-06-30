@@ -2,7 +2,7 @@ import React from 'react';
 import { useGame } from '../context/GameContext';
 
 export default function Header() {
-  const { walletConnected, walletAddress, solBalance, rpsRating, connectWallet, disconnectWallet } = useGame();
+  const { walletConnected, walletAddress, solBalance, username, connectWallet, disconnectWallet } = useGame();
 
   return (
     <header className="header">
@@ -20,7 +20,7 @@ export default function Header() {
 
       <div className="header-right">
         {walletConnected ? (
-          <div className="wallet-profile" onClick={disconnectWallet} title="Click to disconnect wallet">
+          <div className="wallet-profile" onClick={disconnectWallet} title={`Connected: ${walletAddress}. Click to disconnect.`}>
             <div className="wallet-avatar-box">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect>
@@ -29,7 +29,7 @@ export default function Header() {
               </svg>
             </div>
             <div className="wallet-info">
-              <span className="wallet-name">Hakuna matata</span>
+              <span className="wallet-name">{username}</span>
               <span className="wallet-sol">{solBalance.toFixed(2)} SOL</span>
             </div>
           </div>
