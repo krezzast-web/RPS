@@ -147,8 +147,8 @@ export default function Profile({ wallet, onClose }) {
                       <span style={{ fontSize: '11px', color: '#333', marginRight: '4px' }}>vs</span>
                       <span style={{ fontSize: '14px', marginRight: '12px' }}>{moveEmoji(oppMove)}</span>
                       <span style={s.pill(result)}>{result}</span>
-                      <span style={{ fontSize: '11px', color: '#d4ff00', marginLeft: '8px', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>
-                        {m.bet_chips} ⬡
+                      <span style={{ fontSize: '11px', color: '#14f195', marginLeft: '8px', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>
+                        ◎ {parseFloat(m.bet_sol || 0).toFixed(3)} SOL
                       </span>
                     </div>
                   );
