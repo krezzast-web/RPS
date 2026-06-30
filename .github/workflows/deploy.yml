@@ -48,25 +48,12 @@ jobs:
           # Prepare directories on the EC2 server
           ssh $USER@$HOST "mkdir -p ~/app/dist"
 
-          # Transfer React build artifacts to the Nginx root directory on the EC2 server
+          # Transfer React build artifacts and Nginx configuration file
           scp -r dist/* $USER@$HOST:~/app/dist/
+          scp .github/nginx.conf $USER@$HOST:~/app/nginx.conf
 
-          # Configure Nginx config file to host static React assets directly on Port 80
+          # Apply Nginx configuration and restart service
           ssh $USER@$HOST "
-            sudo cat > /etc/nginx/sites-available/default << 'EOF'
-server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-
-    server_name _;
-    root /home/ubuntu/app/dist;
-    index index.html;
-
-    location / {
-        try_files \$uri \$uri/ /index.html;
-    }
-}
-EOF
-            # Restart Nginx to apply new host settings
+            sudo mv ~/app/nginx.conf /etc/nginx/sites-available/default
             sudo systemctl restart nginx
           "
