@@ -6,18 +6,14 @@ import Admin from './components/Admin';
 import { useGame } from './context/GameContext';
 import './App.css';
 
-function App() {
-  // Admin panel route — served at /admin, completely separate from the game UI
-  if (window.location.pathname === '/admin') {
-    return <Admin />;
-  }
-
-  const { 
-    activeView, 
-    leaveRoom, 
-    createRoomModalOpen, 
-    setCreateRoomModalOpen, 
-    createCustomRoom 
+// GameApp holds all the hooks — rendered only for non-admin routes
+function GameApp() {
+  const {
+    activeView,
+    leaveRoom,
+    createRoomModalOpen,
+    setCreateRoomModalOpen,
+    createCustomRoom
   } = useGame();
 
   // Local Form States for Room Creation Modal
@@ -42,7 +38,6 @@ function App() {
       return;
     }
     createCustomRoom(roomName, betAmount, hasPassword ? roomPassword : '');
-    // Reset local states
     setRoomName('');
     setBetAmount('0.05');
     setHasPassword(false);
@@ -53,9 +48,8 @@ function App() {
     <div className="app-container">
       {/* Sidebar Navigation */}
       <nav className="sidebar" aria-label="Main Navigation">
-        {/* Game/Controller Icon (Active/Interactive) */}
-        <button 
-          className={`sidebar-btn ${activeView === 'lobby' ? 'active' : ''}`} 
+        <button
+          className={`sidebar-btn ${activeView === 'lobby' ? 'active' : ''}`}
           onClick={handleLobbyNav}
           aria-label="Game Lobby Dashboard"
         >
@@ -65,7 +59,7 @@ function App() {
         </button>
 
         {/* Room Creation Trigger (+) */}
-        <button 
+        <button
           className="sidebar-btn sidebar-create-btn"
           onClick={() => setCreateRoomModalOpen(true)}
           aria-label="Create Custom Room"
@@ -80,7 +74,7 @@ function App() {
       {/* Main Panel Content */}
       <main className="main-wrapper">
         <Header />
-        
+
         {activeView === 'lobby' ? (
           <Lobby />
         ) : (
@@ -100,10 +94,10 @@ function App() {
             <form onSubmit={handleCreateSubmit} className="modal-form">
               <div className="form-group">
                 <label htmlFor="modal-room-name" className="form-label">Room Name</label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   id="modal-room-name"
-                  className="form-input" 
+                  className="form-input"
                   placeholder="e.g. My Buddy"
                   value={roomName}
                   onChange={(e) => setRoomName(e.target.value)}
@@ -114,12 +108,12 @@ function App() {
 
               <div className="form-group">
                 <label htmlFor="modal-bet-amount" className="form-label">Bet Amount (SOL)</label>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   id="modal-bet-amount"
-                  className="form-input" 
-                  step="0.01" 
-                  min="0.01" 
+                  className="form-input"
+                  step="0.01"
+                  min="0.01"
                   value={betAmount}
                   onChange={(e) => setBetAmount(e.target.value)}
                   required
@@ -129,8 +123,8 @@ function App() {
               <div className="form-group-switch">
                 <span className="switch-label">Require Password</span>
                 <label className="switch-toggle" htmlFor="password-toggle">
-                  <input 
-                    type="checkbox" 
+                  <input
+                    type="checkbox"
                     id="password-toggle"
                     checked={hasPassword}
                     onChange={(e) => setHasPassword(e.target.checked)}
@@ -142,10 +136,10 @@ function App() {
               {hasPassword && (
                 <div className="form-group animate-slide-down">
                   <label htmlFor="modal-password" className="form-label">Password</label>
-                  <input 
-                    type="password" 
+                  <input
+                    type="password"
                     id="modal-password"
-                    className="form-input" 
+                    className="form-input"
                     placeholder="Enter room password"
                     value={roomPassword}
                     onChange={(e) => setRoomPassword(e.target.value)}
@@ -163,6 +157,14 @@ function App() {
       )}
     </div>
   );
+}
+
+// Root component — routes to Admin or GameApp based on path, no hooks here
+function App() {
+  if (window.location.pathname === '/admin') {
+    return <Admin />;
+  }
+  return <GameApp />;
 }
 
 export default App;
