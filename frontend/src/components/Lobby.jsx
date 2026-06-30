@@ -11,6 +11,7 @@ export default function Lobby() {
     lobbyStats,
     roomTiers,
     walletConnected,
+    walletAddress,
     connectWallet
   } = useGame();
 
@@ -18,6 +19,31 @@ export default function Lobby() {
   const [giveawayHistoryOpen, setGiveawayHistoryOpen] = useState(false);
   const [giveawayHistory, setGiveawayHistory] = useState(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
+
+  const [tweetUrls, setTweetUrls] = useState({});
+  const [verifying, setVerifying] = useState({});
+
+  const handleVerifyShare = async (giveawayId) => {
+    if (!walletAddress) { alert("Please connect your wallet first!"); return; }
+    const url = tweetUrls[giveawayId];
+    if (!url || !url.trim()) { alert("Please enter a valid tweet URL."); return; }
+    setVerifying(prev => ({ ...prev, [giveawayId]: true }));
+    try {
+      const res = await fetch(`/api/giveaways/${giveawayId}/verify-share`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet: walletAddress, tweetUrl: url.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      alert("Verification successful! You have entered the giveaway.");
+      setTweetUrls(prev => ({ ...prev, [giveawayId]: '' }));
+    } catch (err) {
+      alert("Verification failed: " + err.message);
+    } finally {
+      setVerifying(prev => ({ ...prev, [giveawayId]: false }));
+    }
+  };
 
   const handleCopyInvite = (id) => {
     navigator.clipboard.writeText(`${window.location.origin}/room/${id}`);
@@ -297,27 +323,54 @@ export default function Lobby() {
           <div style={{ padding: '12px', background: '#1D1D1D', border: '1px solid #333333', fontSize: '10.5px', color: 'var(--text-secondary)', lineHeight: '1.4', display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
             <strong style={{ color: 'var(--accent-color)', textTransform: 'uppercase', fontSize: '9.5px', letterSpacing: '0.5px' }}>Giveaway Info & Rules</strong>
             <div>• <strong>Funding:</strong> 30% of all match fees are fed into the pool.</div>
-            <div>• <strong>Eligibility:</strong> Play at least 1 game in the last 7 days to qualify.</div>
-            <div>• <strong>Winners:</strong> Chosen randomly. Odds = 1 / total active weekly players.</div>
+            <div>• <strong>Eligibility:</strong> Connect Twitter (X) and submit your verified platform share tweet link below to qualify!</div>
+            <div>• <strong>Bot Verification:</strong> Our bot checks your tweet text to ensure it contains our platform link and matches your linked username.</div>
           </div>
 
           <div className="giveaway-list">
             {giveaways.length === 0 ? (
-              <div style={{ padding: '12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>
-                No active giveaways. Check back soon!
-              </div>
+               <div style={{ padding: '12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>
+                 No active giveaways. Check back soon!
+               </div>
             ) : (
               giveaways.map((gw) => (
-                <div key={gw.id} className="giveaway-row">
-                  <div className="giveaway-info">
-                    <span className="giveaway-title">
-                      {isEndingSoon(gw.end_date) && <span style={{ color: '#f87171', marginRight: '4px', fontWeight: 'bold' }}>[ENDING SOON] </span>}
+                <div key={gw.id} className="giveaway-row" style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', border: '1px solid #333333', background: '#1D1D1D', marginBottom: '8px' }}>
+                  <div className="giveaway-info" style={{ display: 'flex', flexDirection: 'column' }}>
+                    <span className="giveaway-title" style={{ fontWeight: 700, fontSize: '11px', color: 'var(--text-primary)' }}>
+                      {isEndingSoon(gw.end_date) && <span style={{ color: '#f87171', marginRight: '4px' }}>[ENDING SOON] </span>}
                       {gw.title}
                     </span>
-                    <span className="giveaway-meta" style={{ display: 'inline-flex', alignItems: 'center' }}>
-                      <SolanaIcon size={10} style={{ marginRight: '4px' }} /> {parseFloat(gw.prize_sol || 0).toFixed(4)} SOL · {gw.winner_count} winner{gw.winner_count > 1 ? 's' : ''}
+                    <span className="giveaway-meta" style={{ display: 'inline-flex', alignItems: 'center', fontSize: '9.5px', color: 'var(--text-muted)' }}>
+                      <SolanaIcon size={8} style={{ marginRight: '4px' }} /> {parseFloat(gw.prize_sol || 0).toFixed(4)} SOL · {gw.winner_count} winner{gw.winner_count > 1 ? 's' : ''}
                       {gw.end_date_formatted && ` · Ends ${gw.end_date_formatted}`}
                     </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px' }}>
+                    <a
+                      href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`Just entered the ${gw.title} giveaway on rps.flappycat.fun! Join the ultimate RPS room, link your wallet, and play to win SOL! #Rpsroom #Solana`)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn-connect-wallet"
+                      style={{ padding: '0 8px', height: '24px', fontSize: '8.5px', background: '#1DA1F2', color: '#FFF', border: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', whiteSpace: 'nowrap' }}
+                    >
+                      SHARE ON X
+                    </a>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="Paste post URL here"
+                      value={tweetUrls[gw.id] || ''}
+                      onChange={(e) => setTweetUrls(prev => ({ ...prev, [gw.id]: e.target.value }))}
+                      style={{ flex: 1, height: '24px', fontSize: '9px', padding: '0 6px', background: '#1D1D1D', border: '1px solid #333333', color: '#FFF' }}
+                    />
+                    <button
+                      onClick={() => handleVerifyShare(gw.id)}
+                      disabled={verifying[gw.id]}
+                      className="btn-connect-wallet"
+                      style={{ padding: '0 8px', height: '24px', fontSize: '8.5px', background: 'var(--accent-color)', color: '#000', border: 'none', whiteSpace: 'nowrap' }}
+                    >
+                      {verifying[gw.id] ? 'VERIFYING...' : 'VERIFY & ENTER'}
+                    </button>
                   </div>
                 </div>
               ))

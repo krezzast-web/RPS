@@ -27,7 +27,8 @@ function GameApp() {
   // Local Form States for Room Creation Modal
   const [roomName, setRoomName] = useState('');
   const [betAmount, setBetAmount] = useState('0.01');
-  const [feeRate, setFeeRate] = useState('2.0'); // default 2%
+  const [feeRate, setFeeRate] = useState('3.0'); // default 3%
+  const [expirationHours, setExpirationHours] = useState('24');
   const [hasPassword, setHasPassword] = useState(false);
   const [roomPassword, setRoomPassword] = useState('');
 
@@ -41,8 +42,9 @@ function GameApp() {
   const handleCreateSubmit = (e) => {
     e.preventDefault();
     if (!roomName.trim()) { alert("Please enter a room name."); return; }
-    createCustomRoom(roomName, parseFloat(betAmount), parseFloat(feeRate) / 100, hasPassword ? roomPassword : '');
-    setRoomName(''); setBetAmount('0.01'); setFeeRate('2.0'); setHasPassword(false); setRoomPassword('');
+    if (parseFloat(feeRate) < 3.0) { alert("Custom rooms require a minimum fee rate of 3%."); return; }
+    createCustomRoom(roomName, parseFloat(betAmount), parseFloat(feeRate) / 100, hasPassword ? roomPassword : '', parseInt(expirationHours));
+    setRoomName(''); setBetAmount('0.01'); setFeeRate('3.0'); setExpirationHours('24'); setHasPassword(false); setRoomPassword('');
     setCreateRoomModalOpen(false); // close the modal!
   };
 
@@ -101,7 +103,20 @@ function GameApp() {
               </div>
               <div className="form-group">
                 <label htmlFor="modal-fee-rate" className="form-label">Fee Rate (%)</label>
-                <input type="number" id="modal-fee-rate" className="form-input" step="0.1" min="0" max="10" value={feeRate} onChange={(e) => setFeeRate(e.target.value)} required />
+                <input type="number" id="modal-fee-rate" className="form-input" step="0.1" min="3.0" max="10" value={feeRate} onChange={(e) => setFeeRate(e.target.value)} required />
+              </div>
+              <div style={{ background: '#1D1D1D', border: '1px solid #333333', padding: '10px', fontSize: '10px', color: 'var(--text-secondary)', lineHeight: '1.4', marginBottom: '10px' }}>
+                <strong>Host Reward System:</strong> The platform keeps 1.5% of match volume. Any fee rate you select above 1.5% is paid directly to you as host rewards when games resolve!
+              </div>
+              <div className="form-group">
+                <label htmlFor="modal-duration" className="form-label">Active Duration (Hours)</label>
+                <select id="modal-duration" className="form-input" value={expirationHours} onChange={(e) => setExpirationHours(e.target.value)} style={{ background: '#1D1D1D', color: '#FFF', border: '1px solid #333333' }}>
+                  <option value="1">1 Hour</option>
+                  <option value="2">2 Hours</option>
+                  <option value="6">6 Hours</option>
+                  <option value="12">12 Hours</option>
+                  <option value="24">24 Hours</option>
+                </select>
               </div>
               <div className="form-group-switch">
                 <span className="switch-label">Require Password</span>

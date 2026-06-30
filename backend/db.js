@@ -24,6 +24,7 @@ async function initDb() {
       sol_balance DECIMAL(18,9) DEFAULT 0,
       custodial_wallet_address VARCHAR(100),
       custodial_wallet_secret TEXT,
+      x_username VARCHAR(100),
       last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -36,6 +37,7 @@ async function initDb() {
       password VARCHAR(255),
       player1_wallet VARCHAR(100) REFERENCES players(wallet_address),
       player2_wallet VARCHAR(100) REFERENCES players(wallet_address),
+      expires_at TIMESTAMP,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -105,6 +107,15 @@ async function initDb() {
       username VARCHAR(50),
       sol_won DECIMAL(18,9),
       won_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS giveaway_entries (
+      id SERIAL PRIMARY KEY,
+      giveaway_id INT REFERENCES giveaways(id) ON DELETE CASCADE,
+      wallet_address VARCHAR(100) REFERENCES players(wallet_address) ON DELETE CASCADE,
+      tweet_url VARCHAR(255) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT unique_entry UNIQUE(giveaway_id, wallet_address)
     );
 
     CREATE TABLE IF NOT EXISTS room_joins (

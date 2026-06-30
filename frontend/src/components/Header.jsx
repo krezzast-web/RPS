@@ -3,7 +3,7 @@ import { useGame } from '../context/GameContext';
 import SolanaIcon from './SolanaIcon';
 
 export default function Header({ onOpenDeposit, onOpenWithdraw, onOpenProfile }) {
-  const { walletConnected, walletAddress, solBalance, username, connectWallet, disconnectWallet } = useGame();
+  const { walletConnected, walletAddress, solBalance, username, xUsername, linkXAccount, connectWallet, disconnectWallet } = useGame();
   const [showMenu, setShowMenu] = useState(false);
 
   // Close menu on outside click
@@ -31,6 +31,32 @@ export default function Header({ onOpenDeposit, onOpenWithdraw, onOpenProfile })
       <div className="header-right">
         {walletConnected ? (
           <div className="header-wallet-group">
+            {/* Twitter Link status / trigger */}
+            {xUsername ? (
+              <div className="chips-display" style={{ background: '#1D1D1D', border: '1px solid #333333', color: '#1DA1F2', display: 'flex', alignItems: 'center', gap: '5px' }} title="Linked Twitter (X)">
+                <svg width="10" height="10" fill="currentColor" viewBox="0 0 24 24" style={{ marginRight: '2px' }}>
+                  <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+                </svg>
+                <span className="chips-amount" style={{ textTransform: 'none', fontWeight: 600 }}>@{xUsername}</span>
+              </div>
+            ) : (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const handle = prompt("Enter your Twitter (X) username (without @):");
+                  if (handle && handle.trim()) {
+                    linkXAccount(handle.trim())
+                      .then(() => alert("Twitter account linked successfully!"))
+                      .catch(err => alert("Failed to link Twitter account: " + err.message));
+                  }
+                }}
+                className="btn-connect-wallet"
+                style={{ padding: '0 12px', height: '30px', fontSize: '9.5px', background: 'transparent', border: '1px solid #1DA1F2', color: '#1DA1F2', whiteSpace: 'nowrap' }}
+              >
+                LINK X/TWITTER
+              </button>
+            )}
+
             {/* SOL Balance with + button */}
             <div className="chips-display">
               <SolanaIcon size={12} style={{ color: 'var(--accent-color)' }} />

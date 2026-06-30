@@ -13,6 +13,7 @@ export const GameProvider = ({ children }) => {
   const [custodialWallet, setCustodialWallet] = useState('');
   const [rpsRating, setRpsRating] = useState(1000);
   const [username, setUsername] = useState('Player');
+  const [xUsername, setXUsername] = useState('');
   const [playerWins, setPlayerWins] = useState(0);
   const [playerLosses, setPlayerLosses] = useState(0);
   const [playerDraws, setPlayerDraws] = useState(0);
@@ -74,6 +75,7 @@ export const GameProvider = ({ children }) => {
       setPlayerWins(profile.wins || 0);
       setPlayerLosses(profile.losses || 0);
       setPlayerDraws(profile.draws || 0);
+      setXUsername(profile.xUsername || '');
     });
 
     // Full lobby state from server — replaces ALL fake local data
@@ -287,7 +289,11 @@ export const GameProvider = ({ children }) => {
   const currentRoomPlayer1WalletRef = useRef('');
 
   const joinRoom = (room) => {
-    if (!walletConnected) connectWallet();
+    if (!walletConnected) { connectWallet(); return; }
+    if (!xUsername) {
+      alert("Please connect your Twitter (X) account in the header first to play!");
+      return;
+    }
 
     setMatchmakingState('waiting_for_opponent');
     setActiveRoom(room);
@@ -305,6 +311,24 @@ export const GameProvider = ({ children }) => {
     joinRoom(room);
   };
 
+  const linkXAccount = async (xUser) => {
+    if (!walletAddress) return;
+    try {
+      const res = await fetch('/api/wallet/link-x', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet: walletAddress, xUsername: xUser })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setXUsername(data.xUsername);
+      return data;
+    } catch (err) {
+      console.error('X account linking failed:', err.message);
+      throw err;
+    }
+  };
+
   const disconnectWallet = () => {
     localStorage.removeItem('rps_wallet_address');
     if (socketRef.current) {
@@ -312,6 +336,7 @@ export const GameProvider = ({ children }) => {
       setWalletAddress('');
       setSolBalance(0);
       setCustodialWallet('');
+      setXUsername('');
       setActiveView('lobby');
       setActiveRoom(null);
       walletRef.current = '';
@@ -361,21 +386,26 @@ export const GameProvider = ({ children }) => {
   const searchAnotherRoom = () => { leaveRoom(); };
   const waitNextOpponent = () => {};
 
-  const createCustomRoom = (name, betSol, feeRate, password) => {
+  const createCustomRoom = (name, betSol, feeRate, password, expirationHours) => {
+    if (!xUsername) {
+      alert("Please connect your Twitter (X) account in the header first to play!");
+      return;
+    }
     if (socketRef.current) {
       socketRef.current.emit('create_room', {
         roomName: name,
         betSol,
         feeRate,
         hasPassword: !!password,
-        roomPassword: password
+        roomPassword: password,
+        expirationHours
       });
     }
   };
 
   return (
     <GameContext.Provider value={{
-      walletConnected, walletAddress, solBalance, custodialWallet, rpsRating, username,
+      walletConnected, walletAddress, solBalance, custodialWallet, rpsRating, username, xUsername,
       playerWins, playerLosses, playerDraws,
       activeView, activeRoom,
       customRooms, createRoomModalOpen, setCreateRoomModalOpen, createCustomRoom,
@@ -390,7 +420,7 @@ export const GameProvider = ({ children }) => {
       joinRoom: joinRoomWithRef, leaveRoom,
       setPlayerReady, makeMove,
       triggerOpponentAFK, getBackToGame, kickUser, searchAnotherRoom, waitNextOpponent,
-      sendChatMessage, likeMessage
+      sendChatMessage, likeMessage, linkXAccount
     }}>
       {children}
     </GameContext.Provider>
