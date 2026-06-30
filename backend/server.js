@@ -528,18 +528,17 @@ app.get('/api/config/deposit-tiers', async (_req, res) => {
     const config = await getConfig();
     const depositFee = parseFloat(config.deposit_fee_rate || 0.03);
     
-    // Exact Riot Games RP equivalent bundles mapped to SOL values
+    // Exact League of Legends RP equivalent bundles mapped to SOL values (without bonuses)
     const tiers = [
-      { sol: 0.03, totalChips: 575,   bonusPct: 0 },
-      { sol: 0.07, totalChips: 1380,  bonusPct: 20 },
-      { sol: 0.13, totalChips: 2800,  bonusPct: 22 },
-      { sol: 0.23, totalChips: 5000,  bonusPct: 24 },
-      { sol: 0.33, totalChips: 7200,  bonusPct: 25 },
-      { sol: 0.67, totalChips: 15000, bonusPct: 30 },
+      { sol: 0.03, totalChips: 575 },
+      { sol: 0.07, totalChips: 1380 },
+      { sol: 0.14, totalChips: 2800 },
+      { sol: 0.23, totalChips: 4500 },
+      { sol: 0.33, totalChips: 6500 },
+      { sol: 0.66, totalChips: 13500 },
     ].map(t => ({
       sol: t.sol,
       totalChips: t.totalChips,
-      bonusPct: t.bonusPct,
       feeChips: Math.round(t.totalChips * depositFee)
     }));
     

@@ -81,7 +81,7 @@ export default function Deposit({ onClose }) {
               {step === 'select' && (
                 <>
                   <div className="deposit-intro">
-                    <p>Select a CHIPS bundle. Larger bundles include bonus CHIPS.</p>
+                    <p>Select a CHIPS bundle to purchase.</p>
                     <span className="exchange-rate-tag">Rate: 1 SOL = 1,000 CHIPS</span>
                   </div>
 
@@ -95,9 +95,6 @@ export default function Deposit({ onClose }) {
                           className={`riot-card ${selected?.sol === tier.sol ? 'selected' : ''}`}
                           onClick={() => setSelected(tier)}
                         >
-                          {tier.bonusPct > 0 && (
-                            <div className="riot-card-badge">+{tier.bonusPct}% BONUS</div>
-                          )}
                           <div className="riot-card-chips">
                             <span className="riot-chips-icon">⬡</span>
                             <span className="riot-chips-amount">{tier.totalChips.toLocaleString()}</span>
