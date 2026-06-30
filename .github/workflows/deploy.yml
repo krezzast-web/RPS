@@ -1,0 +1,72 @@
+name: Build and Deploy Original RPS Game Lobby to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: |
+          npm ci
+
+      - name: Code Quality - Run Linter
+        run: |
+          npm run lint
+
+      - name: Build React Application
+        run: |
+          npm run build
+
+      - name: Deploy static assets to EC2 via SSH
+        env:
+          PRIVATE_KEY: ${{ secrets.EC2_SSH_KEY }}
+          HOST: ${{ secrets.EC2_HOST }}
+          USER: ${{ secrets.EC2_USERNAME }}
+        run: |
+          # Create SSH directory and add key
+          mkdir -p ~/.ssh
+          echo "$PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+          # Build SSH configuration to ignore host key warnings
+          echo -e "Host *\n\tStrictHostKeyChecking no\n\tUserKnownHostsFile=/dev/null" > ~/.ssh/config
+
+          # Prepare directories on the EC2 server
+          ssh $USER@$HOST "mkdir -p ~/app/dist"
+
+          # Transfer React build artifacts to the Nginx root directory on the EC2 server
+          scp -r dist/* $USER@$HOST:~/app/dist/
+
+          # Configure Nginx config file to host static React assets directly on Port 80
+          ssh $USER@$HOST "
+            sudo cat > /etc/nginx/sites-available/default << 'EOF'
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+
+    server_name _;
+    root /home/ubuntu/app/dist;
+    index index.html;
+
+    location / {
+        try_files \$uri \$uri/ /index.html;
+    }
+}
+EOF
+            # Restart Nginx to apply new host settings
+            sudo systemctl restart nginx
+          "

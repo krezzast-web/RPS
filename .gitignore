@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# AWS Provisioning files
+ec2-details.json
+rps-deploy-key.pem
+scripts/
