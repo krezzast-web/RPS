@@ -223,6 +223,8 @@ export const GameProvider = ({ children }) => {
 
     socket.on('join_error', (err) => {
       alert(`Could not join room: ${err}`);
+      setActiveView('lobby');
+      setActiveRoom(null);
     });
   };
 
@@ -359,11 +361,12 @@ export const GameProvider = ({ children }) => {
   const searchAnotherRoom = () => { leaveRoom(); };
   const waitNextOpponent = () => {};
 
-  const createCustomRoom = (name, betSol, password) => {
+  const createCustomRoom = (name, betSol, feeRate, password) => {
     if (socketRef.current) {
       socketRef.current.emit('create_room', {
         roomName: name,
         betSol,
+        feeRate,
         hasPassword: !!password,
         roomPassword: password
       });

@@ -27,6 +27,7 @@ function GameApp() {
   // Local Form States for Room Creation Modal
   const [roomName, setRoomName] = useState('');
   const [betAmount, setBetAmount] = useState('0.01');
+  const [feeRate, setFeeRate] = useState('2.0'); // default 2%
   const [hasPassword, setHasPassword] = useState(false);
   const [roomPassword, setRoomPassword] = useState('');
 
@@ -40,8 +41,9 @@ function GameApp() {
   const handleCreateSubmit = (e) => {
     e.preventDefault();
     if (!roomName.trim()) { alert("Please enter a room name."); return; }
-    createCustomRoom(roomName, parseFloat(betAmount), hasPassword ? roomPassword : '');
-    setRoomName(''); setBetAmount('0.01'); setHasPassword(false); setRoomPassword('');
+    createCustomRoom(roomName, parseFloat(betAmount), parseFloat(feeRate) / 100, hasPassword ? roomPassword : '');
+    setRoomName(''); setBetAmount('0.01'); setFeeRate('2.0'); setHasPassword(false); setRoomPassword('');
+    setCreateRoomModalOpen(false); // close the modal!
   };
 
   return (
@@ -96,6 +98,10 @@ function GameApp() {
               <div className="form-group">
                 <label htmlFor="modal-bet-amount" className="form-label">Bet Amount (SOL)</label>
                 <input type="number" id="modal-bet-amount" className="form-input" step="0.001" min="0.001" value={betAmount} onChange={(e) => setBetAmount(e.target.value)} required />
+              </div>
+              <div className="form-group">
+                <label htmlFor="modal-fee-rate" className="form-label">Fee Rate (%)</label>
+                <input type="number" id="modal-fee-rate" className="form-input" step="0.1" min="0" max="10" value={feeRate} onChange={(e) => setFeeRate(e.target.value)} required />
               </div>
               <div className="form-group-switch">
                 <span className="switch-label">Require Password</span>

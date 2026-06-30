@@ -140,13 +140,25 @@ export default function Lobby() {
                   </div>
 
                   <div className="room-card-line-stats">
-                    <span>Players: <strong>{tier.active_players || 0}</strong></span>
-                    <span className="divider-dot">·</span>
-                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>Price: <strong style={{ color: 'var(--accent-color)', marginLeft: '4px', display: 'inline-flex', alignItems: 'center' }}><SolanaIcon size={10} style={{ marginRight: '2px' }} /> {parseFloat(tier.bet_sol).toFixed(2)} SOL</strong></span>
-                    <span className="divider-dot">·</span>
-                    <span>Fee: <strong>{(parseFloat(tier.fee_rate) * 100).toFixed(0)}%</strong></span>
-                    <span className="divider-dot">·</span>
-                    <span>Games: <strong>{tier.games_played || 0}</strong></span>
+                    <div className="card-stat-col">
+                      <span className="stat-label">Players</span>
+                      <strong className="stat-val">{tier.active_players || 0}</strong>
+                    </div>
+                    <div className="card-stat-col">
+                      <span className="stat-label">Price</span>
+                      <strong className="stat-val" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-color)' }}>
+                        <SolanaIcon size={10} style={{ marginRight: '2px' }} />
+                        {parseFloat(tier.bet_sol).toFixed(2)}
+                      </strong>
+                    </div>
+                    <div className="card-stat-col">
+                      <span className="stat-label">Fee</span>
+                      <strong className="stat-val">{(parseFloat(tier.fee_rate) * 100).toFixed(0)}%</strong>
+                    </div>
+                    <div className="card-stat-col">
+                      <span className="stat-label">Games</span>
+                      <strong className="stat-val">{tier.games_played || 0}</strong>
+                    </div>
                   </div>
 
                   <button
@@ -282,6 +294,13 @@ export default function Lobby() {
           </div>
 
           {/* Active Giveaways */}
+          <div style={{ padding: '12px', background: '#1D1D1D', border: '1px solid #333333', fontSize: '10.5px', color: 'var(--text-secondary)', lineHeight: '1.4', display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
+            <strong style={{ color: 'var(--accent-color)', textTransform: 'uppercase', fontSize: '9.5px', letterSpacing: '0.5px' }}>Giveaway Info & Rules</strong>
+            <div>• <strong>Funding:</strong> 30% of all match fees are fed into the pool.</div>
+            <div>• <strong>Eligibility:</strong> Play at least 1 game in the last 7 days to qualify.</div>
+            <div>• <strong>Winners:</strong> Chosen randomly. Odds = 1 / total active weekly players.</div>
+          </div>
+
           <div className="giveaway-list">
             {giveaways.length === 0 ? (
               <div style={{ padding: '12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>

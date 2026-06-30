@@ -175,18 +175,18 @@ async function broadcastLobbyState() {
                  WHERE m.room_id LIKE 'tier_' || rt.id || '\\_%' ESCAPE '\\'
                ), 0) as games_played,
                COALESCE((
-                 SELECT COUNT(*) FROM matches m
-                 WHERE m.room_id LIKE 'tier_' || rt.id || '\\_%' ESCAPE '\\'
-                   AND m.played_at >= NOW() - INTERVAL '10 minutes'
+                 SELECT COUNT(DISTINCT wallet_address) FROM room_joins rj
+                 WHERE rj.room_tier = rt.id
+                   AND rj.joined_at >= NOW() - INTERVAL '10 minutes'
                ), 0) / 10.0 as games_per_min,
                (
                  SELECT json_agg(coalesce(mc.cnt, 0))
                  FROM (
                    SELECT gs.m, (
-                     SELECT count(*) FROM matches m2
-                     WHERE m2.room_id LIKE 'tier_' || rt.id || '\\_%' ESCAPE '\\'
-                       AND m2.played_at >= NOW() - (gs.m + 1) * INTERVAL '1 minute'
-                       AND m2.played_at < NOW() - gs.m * INTERVAL '1 minute'
+                     SELECT COUNT(DISTINCT wallet_address) FROM room_joins rj2
+                     WHERE rj2.room_tier = rt.id
+                       AND rj2.joined_at >= NOW() - (gs.m + 1) * INTERVAL '1 minute'
+                       AND rj2.joined_at < NOW() - gs.m * INTERVAL '1 minute'
                    ) as cnt
                    FROM generate_series(0, 9) gs(m)
                    ORDER BY gs.m DESC
@@ -311,14 +311,15 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('create_room', async ({ roomName, betSol, hasPassword, roomPassword }) => {
+  socket.on('create_room', async ({ roomName, betSol, feeRate, hasPassword, roomPassword }) => {
     if (!userWallet) return;
     const roomId = `room_${Date.now()}`;
+    const cleanFee = parseFloat(feeRate !== undefined ? feeRate : 0.02);
     try {
       await db.query(
         `INSERT INTO rooms (id, name, bet_sol, fee_rate, status, password, player1_wallet)
-         VALUES ($1, $2, $3, 0.02, 'OPEN', $4, $5)`,
-        [roomId, roomName.toUpperCase(), parseFloat(betSol || 0.01), hasPassword ? roomPassword : null, userWallet]
+         VALUES ($1, $2, $3, $4, 'OPEN', $5, $6)`,
+        [roomId, roomName.toUpperCase(), parseFloat(betSol || 0.01), cleanFee, hasPassword ? roomPassword : null, userWallet]
       );
       socket.emit('room_created', roomId);
       broadcastLobbyState();
@@ -330,7 +331,65 @@ io.on('connection', (socket) => {
   socket.on('join_room', async ({ roomId, password }) => {
     if (!userWallet) return;
     try {
-      const roomRes = await db.query('SELECT * FROM rooms WHERE id = $1', [roomId]);
+      let targetRoomId = roomId;
+
+      // Handle tier matchmaking
+      if (roomId.startsWith('tier_')) {
+        const parts = roomId.split('_');
+        const tierId = parts[1]; // e.g. "shrimp"
+
+        // Get tier settings from DB
+        const tierRes = await db.query('SELECT * FROM room_tiers WHERE id = $1', [tierId]);
+        if (!tierRes.rows[0]) {
+          socket.emit('join_error', 'Invalid room tier');
+          return;
+        }
+        const tier = tierRes.rows[0];
+
+        // 1. Look for an open room of this tier that is NOT owned by the current player
+        const openRoomRes = await db.query(`
+          SELECT id FROM rooms
+          WHERE status = 'OPEN'
+            AND id LIKE $1
+            AND player1_wallet != $2
+          ORDER BY created_at ASC
+          LIMIT 1
+        `, [`tier_${tierId}_%`, userWallet]);
+
+        if (openRoomRes.rows[0]) {
+          targetRoomId = openRoomRes.rows[0].id;
+        } else {
+          // Check if this player already has an open room for this tier
+          const myOpenRoomRes = await db.query(`
+            SELECT id FROM rooms
+            WHERE status = 'OPEN'
+              AND id LIKE $1
+              AND player1_wallet = $2
+            LIMIT 1
+          `, [`tier_${tierId}_%`, userWallet]);
+
+          if (myOpenRoomRes.rows[0]) {
+            targetRoomId = myOpenRoomRes.rows[0].id;
+          } else {
+            // Create a new open room for this tier
+            await db.query(`
+              INSERT INTO rooms (id, name, bet_sol, fee_rate, status, player1_wallet)
+              VALUES ($1, $2, $3, $4, 'OPEN', $5)
+            `, [
+              roomId,
+              tier.title.toUpperCase(),
+              parseFloat(tier.bet_sol),
+              parseFloat(tier.fee_rate),
+              userWallet
+            ]);
+            targetRoomId = roomId;
+          }
+        }
+        // Track the join event to build dynamic user graphs
+        await db.query('INSERT INTO room_joins (room_tier, wallet_address) VALUES ($1, $2)', [tierId, userWallet]);
+      }
+
+      const roomRes = await db.query('SELECT * FROM rooms WHERE id = $1', [targetRoomId]);
       if (!roomRes.rows[0]) { socket.emit('join_error', 'Room does not exist'); return; }
 
       const room = roomRes.rows[0];
@@ -347,12 +406,12 @@ io.on('connection', (socket) => {
         return;
       }
 
-      currentRoomId = roomId;
-      socket.join(roomId);
+      currentRoomId = targetRoomId;
+      socket.join(targetRoomId);
       socket.leave('lobby');
 
       if (room.player1_wallet !== userWallet && !room.player2_wallet) {
-        await db.query("UPDATE rooms SET player2_wallet = $1, status = 'PLAYING' WHERE id = $2", [userWallet, roomId]);
+        await db.query("UPDATE rooms SET player2_wallet = $1, status = 'PLAYING' WHERE id = $2", [userWallet, targetRoomId]);
       }
 
       const playersRes = await db.query(`
@@ -362,12 +421,12 @@ io.on('connection', (socket) => {
         FROM rooms r
         LEFT JOIN players p1 ON r.player1_wallet = p1.wallet_address
         LEFT JOIN players p2 ON r.player2_wallet = p2.wallet_address
-        WHERE r.id = $1`, [roomId]);
+        WHERE r.id = $1`, [targetRoomId]);
 
       const pData = playersRes.rows[0];
 
-      if (!activeGames.has(roomId)) {
-        activeGames.set(roomId, {
+      if (!activeGames.has(targetRoomId)) {
+        activeGames.set(targetRoomId, {
           player1Wallet: pData.player1_wallet, player2Wallet: pData.player2_wallet,
           player1Ready: false, player2Ready: false,
           player1Move: null, player2Move: null,
@@ -375,13 +434,13 @@ io.on('connection', (socket) => {
           history1: [], history2: [], timer: null
         });
       } else {
-        const game = activeGames.get(roomId);
+        const game = activeGames.get(targetRoomId);
         if (!game.player2Wallet && pData.player2_wallet) game.player2Wallet = pData.player2_wallet;
       }
 
-      const game = activeGames.get(roomId);
-      io.to(roomId).emit('room_sync', {
-        roomId, title: pData.name,
+      const game = activeGames.get(targetRoomId);
+      io.to(targetRoomId).emit('room_sync', {
+        roomId: targetRoomId, title: pData.name,
         betSol: parseFloat(pData.bet_sol), feeRate: parseFloat(pData.fee_rate),
         status: pData.status,
         player1: { wallet: pData.player1_wallet, name: pData.p1_name, rating: pData.p1_rating, wins: pData.p1_wins, losses: pData.p1_losses, draws: pData.p1_draws, history: game.history1 },

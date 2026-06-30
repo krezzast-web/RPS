@@ -107,6 +107,13 @@ async function initDb() {
       won_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS room_joins (
+      id SERIAL PRIMARY KEY,
+      room_tier VARCHAR(50) NOT NULL,
+      wallet_address VARCHAR(100) NOT NULL,
+      joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS platform_config (
       key VARCHAR(50) PRIMARY KEY,
       value TEXT NOT NULL,
