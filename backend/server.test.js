@@ -1,4 +1,3 @@
-const http = require('http');
 const ioClient = require('socket.io-client');
 
 jest.mock('bcryptjs', () => ({
@@ -11,35 +10,104 @@ jest.mock('jsonwebtoken', () => ({
   verify: jest.fn().mockReturnValue({ adminId: 1, username: 'admin' })
 }));
 
+// Mock @solana/web3.js — it uses ESM internally which Jest/CommonJS cannot parse
+jest.mock('@solana/web3.js', () => ({
+  Keypair: {
+    generate: jest.fn(() => ({
+      publicKey: { toString: () => 'MockCustodialAddress111111111111111111111111' },
+      secretKey: new Uint8Array(64).fill(1)
+    })),
+    fromSecretKey: jest.fn((key) => ({
+      publicKey: { toString: () => 'MockCustodialAddress111111111111111111111111' }
+    }))
+  },
+  Connection: jest.fn().mockImplementation(() => ({
+    getBalance: jest.fn().mockResolvedValue(500000000), // 0.5 SOL in lamports
+    sendRawTransaction: jest.fn().mockResolvedValue('mock_tx_signature')
+  })),
+  PublicKey: jest.fn().mockImplementation((addr) => ({ toString: () => addr })),
+  SystemProgram: {
+    transfer: jest.fn().mockReturnValue({ type: 'transfer' })
+  },
+  Transaction: jest.fn().mockImplementation(() => ({
+    add: jest.fn().mockReturnThis()
+  })),
+  LAMPORTS_PER_SOL: 1000000000,
+  sendAndConfirmTransaction: jest.fn().mockResolvedValue('mock_tx_sig_abc123')
+}));
+
 jest.mock('./db', () => {
   const players = {};
   const rooms = {};
   const messages = [];
 
   return {
-    query: jest.fn((text, params) => {
+    query: jest.fn((text, _params) => {
+      const params = _params || [];
+
       if (text.includes('INSERT INTO players')) {
         const wallet = params[0];
         const username = params[1];
         if (!players[wallet]) {
-          players[wallet] = { wallet_address: wallet, username, rating: 1000, wins: 0, losses: 0, draws: 0, chips_balance: 0 };
+          players[wallet] = {
+            wallet_address: wallet,
+            username,
+            rating: 1000,
+            wins: 0,
+            losses: 0,
+            draws: 0,
+            sol_balance: 0,
+            custodial_wallet_address: null,
+            custodial_wallet_secret: null
+          };
         }
         return Promise.resolve({ rows: [] });
       }
+
       if (text.includes('FROM players WHERE wallet_address')) {
         const wallet = params[0];
-        const p = players[wallet] || { wallet_address: wallet, username: `Player_${wallet.substring(0, 4)}`, rating: 1000, wins: 0, losses: 0, draws: 0, chips_balance: 0 };
+        const p = players[wallet] || {
+          wallet_address: wallet,
+          username: `Player_${wallet.substring(0, 4)}`,
+          rating: 1000,
+          wins: 0,
+          losses: 0,
+          draws: 0,
+          sol_balance: 0,
+          custodial_wallet_address: null,
+          custodial_wallet_secret: null
+        };
         return Promise.resolve({ rows: [p] });
       }
-      if (text.includes('INSERT INTO rooms')) {
-        const id = params[0];
-        rooms[id] = { id, name: params[1], price: params[2], fee: 0.1, status: 'OPEN', player1_wallet: params[4], player2_wallet: null };
+
+      if (text.includes('UPDATE players SET custodial_wallet_address')) {
+        const wallet = params[2];
+        if (players[wallet]) {
+          players[wallet].custodial_wallet_address = params[0];
+          players[wallet].custodial_wallet_secret = params[1];
+        }
         return Promise.resolve({ rows: [] });
       }
+
+      if (text.includes('INSERT INTO rooms')) {
+        const id = params[0];
+        rooms[id] = {
+          id,
+          name: params[1],
+          bet_sol: parseFloat(params[2]) || 0.01,
+          fee_rate: 0.02,
+          status: 'OPEN',
+          player1_wallet: params[4],
+          player2_wallet: null
+        };
+        return Promise.resolve({ rows: [] });
+      }
+
       if (text.includes('SELECT * FROM rooms WHERE id =')) {
         const id = params[0];
         return Promise.resolve({ rows: rooms[id] ? [rooms[id]] : [] });
       }
+
       if (text.includes('UPDATE rooms SET player2_wallet =')) {
         const wallet = params[0];
         const id = params[1];
@@ -49,6 +117,7 @@ jest.mock('./db', () => {
         }
         return Promise.resolve({ rows: [] });
       }
+
       if (text.includes('SELECT r.*, p1.username as p1_name')) {
         const id = params[0];
         const r = rooms[id];
@@ -58,8 +127,8 @@ jest.mock('./db', () => {
           rows: [{
             id: r?.id,
             name: r?.name,
-            price: r?.price,
-            fee: r?.fee,
+            bet_sol: r?.bet_sol || 0.01,
+            fee_rate: r?.fee_rate || 0.02,
             status: r?.status,
             player1_wallet: r?.player1_wallet,
             player2_wallet: r?.player2_wallet,
@@ -68,33 +137,81 @@ jest.mock('./db', () => {
           }]
         });
       }
+
       if (text.includes('INSERT INTO messages')) {
-        messages.push({ sender_username: params[0], text: params[3], likes: 0, created_at: new Date() });
+        messages.push({ sender_username: params[0], text: params[3], likes: 0 });
         return Promise.resolve({ rows: [] });
       }
+
       if (text.includes('SELECT sender_username as sender')) {
         return Promise.resolve({ rows: messages.slice(-10) });
       }
-      if (text.includes('SELECT COUNT(*)') || text.includes('wallets_count')) {
-        return Promise.resolve({ rows: [{ wallets_count: Object.keys(players).length, rooms_count: Object.keys(rooms).length, matches_count: 0, giveaways_count: 0 }] });
+
+      if (text.includes('wallets_count') || text.includes('SELECT COUNT(*)')) {
+        return Promise.resolve({
+          rows: [{
+            wallets_count: Object.keys(players).length,
+            rooms_count: Object.keys(rooms).length,
+            matches_count: 0,
+            giveaways_count: 0,
+            pool_sol: '0',
+            fees_collected_sol: '0'
+          }]
+        });
       }
-      if (text.includes('SELECT username, rating') || text.includes('chips_balance DESC')) {
-        return Promise.resolve({ rows: Object.values(players).map(p => ({ username: p.username, rating: p.rating, chips_balance: 0, wins: 0, losses: 0, draws: 0, wallet_address: p.wallet_address })) });
+
+      if (text.includes('SELECT username, rating') || text.includes('sol_balance DESC') || text.includes('ORDER BY rating DESC')) {
+        return Promise.resolve({
+          rows: Object.values(players).map(p => ({
+            username: p.username,
+            rating: p.rating,
+            sol_balance: 0,
+            wins: 0,
+            losses: 0,
+            draws: 0,
+            wallet_address: p.wallet_address
+          }))
+        });
       }
-      if (text.includes('SELECT r.id, r.name')) {
-        return Promise.resolve({ rows: Object.values(rooms).map(r => ({ id: r.id, name: r.name, price: r.price, fee: r.fee, status: r.status, players: r.player2_wallet ? 2 : 1 })) });
+
+      if (text.includes('SELECT r.id, r.name') || text.includes('status = \'OPEN\'')) {
+        return Promise.resolve({
+          rows: Object.values(rooms).map(r => ({
+            id: r.id,
+            name: r.name,
+            bet_sol: r.bet_sol,
+            fee_rate: r.fee_rate,
+            status: r.status,
+            players: r.player2_wallet ? 2 : 1
+          }))
+        });
       }
+
       if (text.includes('FROM room_tiers')) {
-        return Promise.resolve({ rows: [
-          { id: 'ranked', title: 'Ranked Room', tier_type: 'ranked', bet_chips: 500, fee_rate: 0.02, is_ranked: true, display_order: 0 }
-        ]});
+        return Promise.resolve({
+          rows: [
+            { id: 'ranked', title: 'Ranked Room', tier_type: 'ranked', bet_sol: 0.10, fee_rate: 0.02, is_ranked: true, display_order: 0, is_active: true },
+            { id: 'shrimp', title: 'Shrimp Room', tier_type: 'shrimp', bet_sol: 0.01, fee_rate: 0.02, is_ranked: false, display_order: 1, is_active: true }
+          ]
+        });
       }
+
       if (text.includes('FROM giveaways')) {
         return Promise.resolve({ rows: [] });
       }
+
       if (text.includes('platform_config')) {
-        return Promise.resolve({ rows: [{ key: 'chips_per_sol', value: '1000' }, { key: 'giveaway_pool_chips', value: '0' }] });
+        return Promise.resolve({
+          rows: [
+            { key: 'game_fee_rate', value: '0.02' },
+            { key: 'giveaway_pool_sol', value: '0' },
+            { key: 'platform_fees_collected_sol', value: '0' },
+            { key: 'sol_rpc_url', value: 'https://api.mainnet-beta.solana.com' },
+            { key: 'platform_wallet_address', value: '7o7YrgFHTbxWGezYeue36Lfv6vzXzEsZQVePY4ic66s6' }
+          ]
+        });
       }
+
       return Promise.resolve({ rows: [] });
     }),
     pool: {
@@ -133,25 +250,27 @@ describe('RPS WebSocket Server Integration Tests', () => {
     done();
   });
 
-  it('Player joins lobby and syncs profile details', (done) => {
+  it('Player joins lobby and syncs profile with SOL balance and custodial wallet', (done) => {
     client1.emit('join_lobby', 'wallet_address_123');
 
     client1.on('profile_sync', (profile) => {
       expect(profile).toHaveProperty('username');
       expect(profile.rating).toBe(1000);
-      expect(profile).toHaveProperty('chipsBalance');
-      expect(profile.chipsBalance).toBeGreaterThanOrEqual(0);
+      expect(profile).toHaveProperty('solBalance');
+      expect(profile).toHaveProperty('custodialWallet');
+      expect(typeof profile.solBalance).toBe('number');
+      expect(profile.solBalance).toBeGreaterThanOrEqual(0);
       done();
     });
   });
 
-  it('Player creates custom game room and syncs details', (done) => {
+  it('Player creates custom game room with SOL bet amount', (done) => {
     client1.emit('join_lobby', 'wallet_owner_abc');
 
     client1.on('profile_sync', () => {
       client1.emit('create_room', {
         roomName: 'Tuna Room',
-        betAmount: '0.10',
+        betSol: 0.05,
         hasPassword: false
       });
     });
@@ -162,13 +281,16 @@ describe('RPS WebSocket Server Integration Tests', () => {
     });
   });
 
-  it('Lobby updates are broadcasted to all connected clients', (done) => {
+  it('Lobby updates are broadcasted with SOL stats to all connected clients', (done) => {
     client1.emit('join_lobby', 'wallet_user_1');
     client2.emit('join_lobby', 'wallet_user_2');
 
     client2.once('lobby_update', (lobbyData) => {
       expect(lobbyData).toHaveProperty('customRooms');
       expect(lobbyData).toHaveProperty('topRanks');
+      expect(lobbyData).toHaveProperty('stats');
+      expect(lobbyData.stats).toHaveProperty('poolSol');
+      expect(lobbyData.stats).toHaveProperty('feesCollectedSol');
       expect(lobbyData.stats.wallets).toBeGreaterThanOrEqual(1);
       done();
     });
