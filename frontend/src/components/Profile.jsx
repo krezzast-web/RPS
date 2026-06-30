@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import SolanaIcon from './SolanaIcon';
 
 export default function Profile({ wallet, onClose }) {
   const [data, setData] = useState(null);
@@ -19,9 +20,9 @@ export default function Profile({ wallet, onClose }) {
     setSaveMsg('');
     try {
       const res = await fetch('/api/profile/username', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet, username: editUsername })
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ wallet, username: editUsername })
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error);
@@ -38,20 +39,20 @@ export default function Profile({ wallet, onClose }) {
 
   const s = {
     overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)' },
-    modal: { background: '#111116', border: '1px solid #262626', borderRadius: '12px', width: '560px', maxWidth: '95vw', maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' },
-    header: { padding: '20px 24px 16px', borderBottom: '1px solid #1e1e1e', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+    modal: { background: '#1D1D1D', border: '1px solid #333333', borderRadius: '12px', width: '560px', maxWidth: '95vw', maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' },
+    header: { padding: '20px 24px 16px', borderBottom: '1px solid #333333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
     closeBtn: { background: 'none', border: 'none', color: '#666', fontSize: '20px', cursor: 'pointer' },
     body: { padding: '20px 24px', overflowY: 'auto' },
     statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '20px' },
-    statBox: { background: '#1a1a1a', border: '1px solid #262626', borderRadius: '8px', padding: '12px', textAlign: 'center' },
-    statValue: { fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '20px', color: '#d4ff00' },
+    statBox: { background: '#1D1D1D', border: '1px solid #333333', borderRadius: '8px', padding: '12px', textAlign: 'center' },
+    statValue: { fontFamily: 'Outfit, sans-serif', fontWeight: 800, fontSize: '20px', color: '#DFFE00' },
     statLabel: { fontSize: '10px', color: '#666', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '2px' },
     matchRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', borderRadius: '6px', marginBottom: '4px' },
     moveIcon: { fontSize: '18px' },
     pill: (type) => ({ padding: '2px 8px', borderRadius: '20px', fontSize: '10px', fontWeight: 700, background: type === 'WIN' ? 'rgba(74,222,128,0.15)' : type === 'LOSS' ? 'rgba(248,113,113,0.15)' : 'rgba(251,191,36,0.15)', color: type === 'WIN' ? '#4ade80' : type === 'LOSS' ? '#f87171' : '#fbbf24' }),
-    input: { background: '#1a1a1a', border: '1px solid #d4ff00', borderRadius: '6px', padding: '8px 12px', color: '#fff', fontSize: '14px', outline: 'none', width: '200px' },
-    saveBtn: { background: '#d4ff00', border: 'none', color: '#000', borderRadius: '6px', padding: '8px 16px', fontWeight: 700, fontSize: '12px', cursor: 'pointer' },
-    editBtn: { background: 'none', border: '1px solid #333', color: '#888', borderRadius: '6px', padding: '6px 12px', fontSize: '11px', cursor: 'pointer' },
+    input: { background: '#1D1D1D', border: '1px solid #DFFE00', borderRadius: '6px', padding: '8px 12px', color: '#fff', fontSize: '14px', outline: 'none', width: '200px' },
+    saveBtn: { background: '#DFFE00', border: 'none', color: '#000', borderRadius: '6px', padding: '8px 16px', fontWeight: 700, fontSize: '12px', cursor: 'pointer' },
+    editBtn: { background: 'none', border: '1px solid #333333', color: '#888', borderRadius: '6px', padding: '6px 12px', fontSize: '11px', cursor: 'pointer' },
     sectionTitle: { fontSize: '11px', color: '#555', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px', marginTop: '16px' }
   };
 
@@ -98,7 +99,10 @@ export default function Profile({ wallet, onClose }) {
                   <div style={s.statLabel}>Rank</div>
                 </div>
                 <div style={s.statBox}>
-                  <div style={s.statValue}>◎ {parseFloat(data.sol_balance || 0).toFixed(4)}</div>
+                  <div style={{ ...s.statValue, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                    <SolanaIcon size={14} style={{ color: '#DFFE00' }} />
+                    <span>{parseFloat(data.sol_balance || 0).toFixed(4)}</span>
+                  </div>
                   <div style={s.statLabel}>SOL Balance</div>
                 </div>
                 <div style={s.statBox}>
@@ -147,8 +151,9 @@ export default function Profile({ wallet, onClose }) {
                       <span style={{ fontSize: '11px', color: '#333', marginRight: '4px' }}>vs</span>
                       <span style={{ fontSize: '14px', marginRight: '12px' }}>{moveEmoji(oppMove)}</span>
                       <span style={s.pill(result)}>{result}</span>
-                      <span style={{ fontSize: '11px', color: '#14f195', marginLeft: '8px', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>
-                        ◎ {parseFloat(m.bet_sol || 0).toFixed(3)} SOL
+                      <span style={{ fontSize: '11px', color: '#DFFE00', marginLeft: '8px', fontFamily: 'Outfit, sans-serif', fontWeight: 700, display: 'inline-flex', alignItems: 'center' }}>
+                        <SolanaIcon size={10} style={{ marginRight: '4px' }} />
+                        <span>{parseFloat(m.bet_sol || 0).toFixed(3)} SOL</span>
                       </span>
                     </div>
                   );
@@ -156,8 +161,8 @@ export default function Profile({ wallet, onClose }) {
               )}
             </>
           )}
-        </div>
       </div>
     </div>
+  </div>
   );
 }

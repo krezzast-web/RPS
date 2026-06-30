@@ -6,6 +6,7 @@ import Admin from './components/Admin';
 import Deposit from './components/Deposit';
 import Profile from './components/Profile';
 import { useGame } from './context/GameContext';
+import SolanaIcon from './components/SolanaIcon';
 import './App.css';
 
 // GameApp holds all hooks — rendered only on non-admin routes
@@ -72,9 +73,9 @@ function GameApp() {
             onClick={() => setDepositOpen(true)}
             aria-label="Deposit SOL"
             title="Deposit SOL"
-            style={{ color: 'var(--accent-color)' }}
+            style={{ color: 'var(--accent-color)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           >
-            ◎
+            <SolanaIcon size={14} />
           </button>
         )}
       </nav>

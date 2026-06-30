@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useGame } from '../context/GameContext';
+import SolanaIcon from './SolanaIcon';
 
 export default function Header({ onOpenDeposit, onOpenWithdraw, onOpenProfile }) {
   const { walletConnected, walletAddress, solBalance, username, connectWallet, disconnectWallet } = useGame();
@@ -32,7 +33,7 @@ export default function Header({ onOpenDeposit, onOpenWithdraw, onOpenProfile })
           <div className="header-wallet-group">
             {/* SOL Balance with + button */}
             <div className="chips-display">
-              <span className="chips-icon">◎</span>
+              <SolanaIcon size={12} style={{ color: 'var(--accent-color)' }} />
               <span className="chips-amount">{parseFloat(solBalance || 0).toFixed(4)}</span>
               <span className="chips-label">SOL</span>
               <button

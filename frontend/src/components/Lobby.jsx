@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useGame } from '../context/GameContext';
+import SolanaIcon from './SolanaIcon';
 
 export default function Lobby() {
   const {
@@ -95,7 +96,7 @@ export default function Lobby() {
             <span className="pool-live-dot"></span>
             <span className="pool-live-label">Prize Pool</span>
             <span className="pool-live-amount">
-              {parseFloat(lobbyStats.poolSol).toFixed(3)} SOL
+              <SolanaIcon size={12} style={{ marginRight: '4px' }} /> {parseFloat(lobbyStats.poolSol).toFixed(4)} SOL
             </span>
           </div>
         )}
@@ -123,37 +124,30 @@ export default function Lobby() {
                   )}
                 </div>
 
-                <div className="mini-chart-container">
-                  {[40, 60, 35, 80, 55, 70, 45, 90, 50, 65].map((h, i) => (
-                    <div key={i} className="chart-bar" style={{ height: `${h}%` }} />
-                  ))}
+                <div className="mini-chart-container-wrapper">
+                  <div className="mini-chart-header">
+                    <span>ACTIVE PLAYERS PER MIN</span>
+                    <span>{tier.games_per_min || 0}</span>
+                  </div>
+                  <div className="mini-chart-container">
+                    {[40, 60, 35, 80, 55, 70, 45, 90, 50, 65].map((h, i) => (
+                      <div key={i} className="chart-bar" style={{ height: `${h}%` }} />
+                    ))}
+                  </div>
                 </div>
 
-                <div className="room-card-stats">
-                  <div className="card-stat">
-                    <span className="card-stat-label">Bet</span>
-                    <span className="card-stat-value" style={{ color: 'var(--accent-color)', fontWeight: 700 }}>
-                      ◎ {parseFloat(tier.bet_sol).toFixed(2)} SOL
-                    </span>
-                  </div>
-                  <div className="card-stat">
-                    <span className="card-stat-label">Fee</span>
-                    <span className="card-stat-value">{(parseFloat(tier.fee_rate) * 100).toFixed(1)}%</span>
-                  </div>
-                  <div className="card-stat">
-                    <span className="card-stat-label">Win</span>
-                    <span className="card-stat-value" style={{ color: '#4ade80' }}>
-                      ◎ {(parseFloat(tier.bet_sol) * 2 * (1 - parseFloat(tier.fee_rate))).toFixed(4)} SOL
-                    </span>
-                  </div>
-                  <div className="card-stat">
-                    <span className="card-stat-label">Type</span>
-                    <span className="card-stat-value">{tier.is_ranked ? 'Ranked' : 'Casual'}</span>
-                  </div>
+                <div className="room-card-line-stats">
+                  <span>Players: <strong>{tier.active_players || 0}</strong></span>
+                  <span className="divider-dot">·</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center' }}>Price: <strong style={{ color: 'var(--accent-color)', marginLeft: '4px', display: 'inline-flex', alignItems: 'center' }}><SolanaIcon size={10} style={{ marginRight: '2px' }} /> {parseFloat(tier.bet_sol).toFixed(2)} SOL</strong></span>
+                  <span className="divider-dot">·</span>
+                  <span>Fee: <strong>{(parseFloat(tier.fee_rate) * 100).toFixed(0)}%</strong></span>
+                  <span className="divider-dot">·</span>
+                  <span>Games: <strong>{tier.games_played || 0}</strong></span>
                 </div>
 
                 <button
-                  className="btn-play-card"
+                  className={`btn-play-card ${tier.is_ranked ? 'ranked-btn' : ''}`}
                   onClick={() => handleJoinTier(tier)}
                 >
                   PLAY NOW
@@ -196,7 +190,7 @@ export default function Lobby() {
                   <div className="custom-room-metrics">
                     <div className="metric-col">
                       <span className="metric-lbl">Bet</span>
-                      <span className="metric-val" style={{ color: 'var(--accent-color)' }}>◎ {parseFloat(room.betSol || 0).toFixed(3)} SOL</span>
+                      <span className="metric-val" style={{ color: 'var(--accent-color)', display: 'inline-flex', alignItems: 'center' }}><SolanaIcon size={10} style={{ marginRight: '4px' }} /> {parseFloat(room.betSol || 0).toFixed(3)} SOL</span>
                     </div>
                     <div className="metric-col">
                       <span className="metric-lbl">Players</span>
@@ -251,7 +245,7 @@ export default function Lobby() {
                     <span className="leaderboard-username">{player.name}</span>
                     <span className="leaderboard-rps-score">{player.wins}W · {player.draws}D · {player.losses}L · ELO {player.rating}</span>
                   </div>
-                  <span className="leaderboard-earnings">◎ {parseFloat(player.solBalance || 0).toFixed(3)} SOL</span>
+                  <span className="leaderboard-earnings" style={{ display: 'inline-flex', alignItems: 'center' }}><SolanaIcon size={10} style={{ marginRight: '4px' }} /> {parseFloat(player.solBalance || 0).toFixed(3)} SOL</span>
                 </div>
               ))
             )}
@@ -273,9 +267,8 @@ export default function Lobby() {
           {/* Pool Summary */}
           <div className="giveaway-stats-summary">
             <div className="giveaway-pool">
-              <span className="pool-label">Prize Pool</span>
-              <span className="pool-amount">
-                {parseFloat(lobbyStats.poolSol || 0).toFixed(4)} SOL
+              <span className="pool-amount" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                <SolanaIcon size={12} style={{ marginRight: '4px' }} /> {parseFloat(lobbyStats.poolSol || 0).toFixed(4)} SOL
               </span>
             </div>
             <div className="giveaway-winner-info">
@@ -298,8 +291,8 @@ export default function Lobby() {
                       {isEndingSoon(gw.end_date) && <span style={{ color: '#f87171', marginRight: '4px' }}>⚡</span>}
                       {gw.title}
                     </span>
-                    <span className="giveaway-meta">
-                      ◎ {parseFloat(gw.prize_sol || 0).toFixed(4)} SOL · {gw.winner_count} winner{gw.winner_count > 1 ? 's' : ''}
+                    <span className="giveaway-meta" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                      <SolanaIcon size={10} style={{ marginRight: '4px' }} /> {parseFloat(gw.prize_sol || 0).toFixed(4)} SOL · {gw.winner_count} winner{gw.winner_count > 1 ? 's' : ''}
                       {gw.end_date_formatted && ` · Ends ${gw.end_date_formatted}`}
                     </span>
                   </div>
@@ -331,7 +324,7 @@ export default function Lobby() {
                           <div style={{ fontSize: '10px', color: '#555' }}>{w.title} · {w.date}</div>
                         </div>
                         <div style={{ textAlign: 'right' }}>
-                          <div style={{ color: 'var(--accent-color)', fontWeight: 700, fontFamily: 'Outfit, sans-serif' }}>◎ {parseFloat(w.sol_won || 0).toFixed(4)} SOL</div>
+                          <div style={{ color: 'var(--accent-color)', fontWeight: 700, fontFamily: 'Outfit, sans-serif', display: 'inline-flex', alignItems: 'center' }}><SolanaIcon size={11} style={{ marginRight: '4px' }} /> {parseFloat(w.sol_won || 0).toFixed(4)} SOL</div>
                         </div>
                       </div>
                     ))

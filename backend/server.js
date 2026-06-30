@@ -162,7 +162,27 @@ async function broadcastLobbyState() {
                to_char(g.end_date, 'DD.MM.YYYY') as end_date_formatted, g.end_date
         FROM giveaways g WHERE g.status = 'ACTIVE' ORDER BY g.created_at DESC LIMIT 10
       `),
-      db.query(`SELECT * FROM room_tiers WHERE is_active = TRUE ORDER BY display_order ASC`)
+      db.query(`
+        SELECT rt.*,
+               COALESCE((
+                 SELECT SUM(CASE WHEN r.player2_wallet IS NOT NULL THEN 2 ELSE 1 END)
+                 FROM rooms r
+                 WHERE r.id LIKE 'tier_' || rt.id || '\\_%' ESCAPE '\\'
+               ), 0) as active_players,
+               COALESCE((
+                 SELECT COUNT(*)
+                 FROM matches m
+                 WHERE m.room_id LIKE 'tier_' || rt.id || '\\_%' ESCAPE '\\'
+               ), 0) as games_played,
+               COALESCE((
+                 SELECT COUNT(*) FROM matches m
+                 WHERE m.room_id LIKE 'tier_' || rt.id || '\\_%' ESCAPE '\\'
+                   AND m.played_at >= NOW() - INTERVAL '10 minutes'
+               ), 0) / 10.0 as games_per_min
+        FROM room_tiers rt
+        WHERE rt.is_active = TRUE
+        ORDER BY rt.display_order ASC
+      `)
     ]);
 
     const s = statsRes.rows[0];
@@ -197,7 +217,18 @@ async function broadcastLobbyState() {
         feesCollectedSol: parseFloat(s.fees_collected_sol || 0).toFixed(4)
       },
       giveaways: giveawaysRes.rows,
-      roomTiers: tiersRes.rows,
+      roomTiers: tiersRes.rows.map(t => ({
+        id: t.id,
+        title: t.title,
+        tier_type: t.tier_type,
+        bet_sol: parseFloat(t.bet_sol),
+        fee_rate: parseFloat(t.fee_rate),
+        is_ranked: t.is_ranked,
+        display_order: t.display_order,
+        active_players: parseInt(t.active_players || 0),
+        games_played: parseInt(t.games_played || 0),
+        games_per_min: parseFloat(t.games_per_min || 0)
+      })),
       chatMessages: generalMsgRes.rows
     };
 

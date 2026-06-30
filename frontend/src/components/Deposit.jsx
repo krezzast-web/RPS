@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useGame } from '../context/GameContext';
+import SolanaIcon from './SolanaIcon';
 
 export default function Deposit({ onClose }) {
   const { walletAddress, solBalance, custodialWallet } = useGame();
@@ -74,8 +75,8 @@ export default function Deposit({ onClose }) {
 
         {/* Header */}
         <div className="deposit-header">
-          <div className="deposit-title-group">
-            <span className="deposit-title-icon">◎</span>
+          <div className="deposit-title-group" style={{ display: 'flex', alignItems: 'center' }}>
+            <SolanaIcon size={14} style={{ marginRight: '6px', color: 'var(--accent-color)' }} />
             <span className="deposit-title">SOL Game Wallet</span>
           </div>
           <button className="deposit-close-btn" onClick={onClose}>×</button>
@@ -85,7 +86,10 @@ export default function Deposit({ onClose }) {
         <div className="sol-balance-bar">
           <div className="sol-balance-info">
             <span className="sol-balance-label">Game Balance</span>
-            <span className="sol-balance-value">◎ {currentBalance.toFixed(4)} SOL</span>
+            <span className="sol-balance-value" style={{ display: 'flex', alignItems: 'center' }}>
+              <SolanaIcon size={16} style={{ marginRight: '6px', color: 'var(--accent-color)' }} />
+              <span>{currentBalance.toFixed(4)} SOL</span>
+            </span>
           </div>
           <button
             className={`btn-sync-balance ${syncLoading ? 'loading' : ''}`}
@@ -189,7 +193,7 @@ export default function Deposit({ onClose }) {
                 </div>
                 <div className="withdraw-info-row">
                   <span>Game Balance</span>
-                  <strong style={{ color: 'var(--accent-color)' }}>◎ {currentBalance.toFixed(4)} SOL</strong>
+                  <strong style={{ color: 'var(--accent-color)', display: 'inline-flex', alignItems: 'center' }}><SolanaIcon size={12} style={{ marginRight: '4px' }} /> {currentBalance.toFixed(4)} SOL</strong>
                 </div>
               </div>
 
@@ -220,15 +224,15 @@ export default function Deposit({ onClose }) {
                   <div className="withdraw-preview-card animate-slide-down">
                     <div className="preview-row">
                       <span>You send:</span>
-                      <span>◎ {parseFloat(withdrawAmount).toFixed(4)} SOL</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center' }}><SolanaIcon size={11} style={{ marginRight: '4px' }} /> {parseFloat(withdrawAmount).toFixed(4)} SOL</span>
                     </div>
                     <div className="preview-row">
                       <span>Fee (1%):</span>
-                      <span style={{ color: '#f87171' }}>-◎ {(parseFloat(withdrawAmount) * withdrawFeeRate).toFixed(6)} SOL</span>
+                      <span style={{ color: '#f87171', display: 'inline-flex', alignItems: 'center' }}>-<SolanaIcon size={11} style={{ marginRight: '4px' }} /> {(parseFloat(withdrawAmount) * withdrawFeeRate).toFixed(6)} SOL</span>
                     </div>
                     <div className="preview-row total">
                       <span>You receive:</span>
-                      <span style={{ color: 'var(--accent-color)' }}>◎ {netWithdraw.toFixed(6)} SOL</span>
+                      <span style={{ color: 'var(--accent-color)', display: 'inline-flex', alignItems: 'center' }}><SolanaIcon size={12} style={{ marginRight: '4px' }} /> {netWithdraw.toFixed(6)} SOL</span>
                     </div>
                     <div className="preview-row" style={{ fontSize: '0.75rem', color: 'var(--muted-color)' }}>
                       <span>Destination:</span>
@@ -257,7 +261,7 @@ export default function Deposit({ onClose }) {
                     <div className="alert-content">
                       <span className="alert-icon">✓</span>
                       <div>
-                        <p>Withdrawal successful! <strong>◎ {withdrawResult.solAmount} SOL</strong> sent to your wallet.</p>
+                        <p style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap' }}>Withdrawal successful! &nbsp;<strong style={{ display: 'inline-flex', alignItems: 'center' }}><SolanaIcon size={12} style={{ marginRight: '4px' }} /> {withdrawResult.solAmount} SOL</strong>&nbsp; sent to your wallet.</p>
                         {withdrawResult.signature && (
                           <a
                             href={`https://solscan.io/tx/${withdrawResult.signature}`}
