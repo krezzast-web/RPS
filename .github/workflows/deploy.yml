@@ -80,22 +80,63 @@ jobs:
           # Prepare directories on the EC2 server
           ssh $USER@$HOST "mkdir -p ~/app/backend ~/app/frontend/dist"
 
-          # Transfer files (excluding node_modules)
+          # Transfer files (excluding node_modules and .env)
           scp backend/package.json backend/package-lock.json backend/server.js backend/db.js backend/server.test.js $USER@$HOST:~/app/backend/
           scp -r frontend/dist/* $USER@$HOST:~/app/frontend/dist/
           scp .github/nginx.conf $USER@$HOST:~/app/nginx.conf
 
-          # Apply Nginx settings, install production modules, and reload PM2
+          # Apply Nginx, ensure PostgreSQL is running, install modules, reload PM2
           ssh $USER@$HOST "
+            # --- Nginx ---
             sudo mv ~/app/nginx.conf /etc/nginx/sites-available/default
-            sudo systemctl restart nginx
-            
+            sudo nginx -t && sudo systemctl restart nginx
+
+            # --- PostgreSQL: ensure it is installed and running ---
+            if ! command -v psql &> /dev/null; then
+              echo 'PostgreSQL not found — installing...'
+              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql postgresql-contrib
+            fi
+            sudo systemctl enable postgresql
+            sudo systemctl start postgresql
+            sleep 2
+
+            # Create DB and user idempotently
+            sudo -u postgres psql -c \"CREATE USER rps_user WITH PASSWORD 'rps_password' SUPERUSER;\" 2>/dev/null || true
+            sudo -u postgres psql -c \"CREATE DATABASE rps_db OWNER rps_user;\" 2>/dev/null || true
+
+            # --- .env: create if missing (never overwrite existing) ---
+            if [ ! -f ~/app/backend/.env ]; then
+              echo 'Creating .env file...'
+              cat > ~/app/backend/.env << 'ENVEOF'
+PORT=5000
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=rps_user
+DB_PASSWORD=rps_password
+DB_NAME=rps_db
+ENVEOF
+            fi
+
+            # --- Backend: install and restart ---
             cd ~/app/backend
             npm install --production
             pm2 restart rps-backend || pm2 start server.js --name rps-backend
             pm2 save
-            
-            # Reset permissions on home folder to ensure Nginx read traversal permissions
+
+            # Reset permissions for Nginx
             sudo chmod +x /home/ubuntu
             sudo chmod -R 755 /home/ubuntu/app
+
+            # --- Health check: wait for server and verify ---
+            echo 'Waiting for server to start...'
+            sleep 4
+            HTTP_STATUS=\$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5000/api/health)
+            if [ \"\$HTTP_STATUS\" = '200' ]; then
+              echo 'Health check PASSED — server is up and DB connected'
+            else
+              echo 'Health check FAILED — HTTP status: '\$HTTP_STATUS
+              pm2 logs rps-backend --lines 20 --nostream
+              exit 1
+            fi
           "
+
