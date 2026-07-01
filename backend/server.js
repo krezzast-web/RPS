@@ -692,7 +692,6 @@ io.on('connection', (socket) => {
 
       // Read fee rates from platform config
       const config = await getConfig();
-      const gameFeeRate = parseFloat(config.game_fee_rate || fee_rate);
       const feeRate = parseFloat(fee_rate); // room-level fee takes precedence
       const feeSol = betSol * 2 * feeRate;
       const winnerReceives = betSol * 2 - feeSol;
@@ -1140,7 +1139,6 @@ app.post('/api/wallet/sync-balance', walletAuth, async (req, res) => {
     const custodialAddress = p.custodial_wallet_address;
     const onChainBalance = await getSolBalance(custodialAddress, config.sol_rpc_url);
     const lastSynced = parseFloat(p.custodial_synced_sol || 0);
-    const currentDbBalance = parseFloat(p.sol_balance || 0);
 
     // Only credit the NEW deposit amount (difference above last known on-chain balance)
     // This prevents re-crediting SOL that was already accounted for via game winnings
@@ -1426,6 +1424,7 @@ app.post('/api/admin/login', adminLoginLimiter, async (req, res) => {
     const token = jwt.sign({ adminId: result.rows[0].id, username }, JWT_SECRET, { expiresIn: '8h' });
     res.json({ token });
   } catch (err) {
+    console.error('Admin login failed:', err);
     res.status(500).json({ error: 'Login failed' });
   }
 });

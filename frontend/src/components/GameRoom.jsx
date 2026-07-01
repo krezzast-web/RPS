@@ -129,6 +129,7 @@ export default function GameRoom() {
             triggerToast('Failed to block player.', 'error');
           }
         } catch (e) {
+          console.error('Block player failed:', e);
           triggerToast('Error blocking player.', 'error');
         }
       },
@@ -152,6 +153,7 @@ export default function GameRoom() {
             triggerToast('Failed to submit report.', 'error');
           }
         } catch (e) {
+          console.error('Report player failed:', e);
           triggerToast('Error submitting report.', 'error');
         }
       },

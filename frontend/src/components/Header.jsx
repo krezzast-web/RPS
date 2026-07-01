@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useGame } from '../context/GameContext';
 import SolanaIcon from './SolanaIcon';
 
-export default function Header({ onOpenDeposit, onOpenWithdraw, onOpenProfile }) {
+export default function Header({ onOpenDeposit, onOpenProfile }) {
   const { walletConnected, walletAddress, solBalance, username, xUsername, linkXAccount, connectWallet, disconnectWallet } = useGame();
   const [showMenu, setShowMenu] = useState(false);
   const [xModalOpen, setXModalOpen] = useState(false);

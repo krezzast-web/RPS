@@ -6,7 +6,6 @@ import Admin from './components/Admin';
 import Deposit from './components/Deposit';
 import Profile from './components/Profile';
 import { useGame } from './context/GameContext';
-import SolanaIcon from './components/SolanaIcon';
 import './App.css';
 
 function GameApp() {
@@ -17,7 +16,6 @@ function GameApp() {
     setCreateRoomModalOpen,
     createCustomRoom,
     walletAddress,
-    walletConnected,
     // Custom Dialogs API
     toastMessage,
     toastType,
@@ -88,7 +86,6 @@ function GameApp() {
       <main className="main-wrapper">
         <Header
           onOpenDeposit={() => setDepositOpen(true)}
-          onOpenWithdraw={() => setDepositOpen(true)}
           onOpenProfile={() => setProfileOpen(true)}
         />
 

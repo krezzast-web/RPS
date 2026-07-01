@@ -17,7 +17,7 @@ jest.mock('@solana/web3.js', () => ({
       publicKey: { toString: () => 'MockCustodialAddress111111111111111111111111' },
       secretKey: new Uint8Array(64).fill(1)
     })),
-    fromSecretKey: jest.fn((key) => ({
+    fromSecretKey: jest.fn((_key) => ({
       publicKey: { toString: () => 'MockCustodialAddress111111111111111111111111' }
     }))
   },

@@ -372,6 +372,7 @@ export const GameProvider = ({ children }) => {
     return () => {
       socket.disconnect();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ─── Wallet Auth — Sign nonce with Phantom ──────────────────────────
