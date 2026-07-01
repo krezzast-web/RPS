@@ -19,8 +19,8 @@ describe('RPS Frontend Layout Tests', () => {
     );
 
     // Verify the main application branding logo text exists
-    const logoTitle = screen.getByText(/Rpsroom/i);
-    expect(logoTitle).toBeDefined();
+    const logoTitles = screen.getAllByText(/Rpsroom/i);
+    expect(logoTitles.length).toBeGreaterThanOrEqual(1);
 
     // Verify the connect wallet button is visible initially
     const connectBtn = screen.getByText(/CONNECT WALLET/i);
