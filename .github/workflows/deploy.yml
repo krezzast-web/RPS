@@ -101,7 +101,7 @@ jobs:
 
           # Transfer backend files (not .env — that lives on server only)
           scp backend/package.json backend/package-lock.json \
-              backend/server.js backend/db.js backend/server.test.js \
+              backend/server.js backend/db.js backend/migrate.js backend/server.test.js \
               $USER@$HOST:~/app/backend/
 
           # Transfer built frontend

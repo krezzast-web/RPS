@@ -24,6 +24,7 @@ fi
 # ── Backend ───────────────────────────────────
 cd ~/app/backend
 npm install --production
+node migrate.js
 pm2 restart rps-backend || pm2 start server.js --name rps-backend
 pm2 save
 
