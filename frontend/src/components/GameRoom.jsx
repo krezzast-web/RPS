@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useGame } from '../context/GameContext';
+import Hand3D from './Hand3D';
 
 export default function GameRoom() {
   const {
@@ -381,9 +382,7 @@ export default function GameRoom() {
                 {/* Left Hand (You) */}
                 <div className="arena-player-side">
                   <div className={`hand-visual-container ${matchmakingState === 'cooldown_3s' ? 'shake-left' : ''}`}>
-                    <div className="hand-emoji-fallback">
-                      {getHandEmoji(playerSelection)}
-                    </div>
+                    <Hand3D selection={matchmakingState === 'round_resolved' ? playerSelection : 'R'} isOpponent={false} />
                   </div>
                   <span className="arena-status-label">
                     {matchmakingState === 'cooldown_3s' ? 'WAITING' : 
@@ -413,9 +412,7 @@ export default function GameRoom() {
                 {/* Right Hand (Opponent) */}
                 <div className="arena-player-side">
                   <div className={`hand-visual-container ${matchmakingState === 'cooldown_3s' ? 'shake-right' : ''}`}>
-                    <div className="hand-emoji-fallback" style={{ transform: 'scaleX(-1)' }}>
-                      {getHandEmoji(opponentSelection)}
-                    </div>
+                    <Hand3D selection={matchmakingState === 'round_resolved' ? opponentSelection : 'R'} isOpponent={true} />
                   </div>
                   <span className="arena-status-label">
                     {matchmakingState === 'cooldown_3s' ? 'WAITING' : 

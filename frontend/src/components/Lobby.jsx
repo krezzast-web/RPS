@@ -114,40 +114,78 @@ export default function Lobby() {
   return (
     <div className="lobby-container">
 
-      {/* ── Lobby Stats Banner ── */}
-      <div className="lobby-stats" id="lobby-stats">
-        <div className="stats-grid">
-          <div className="stat-item">
-            <span className="stat-label">Wallets</span>
-            <span className="stat-value">{formatNumber(lobbyStats.wallets)}</span>
+      {/* Lobby Hero Banner */}
+      <section className="lobby-hero-banner" aria-label="Welcome Banner">
+        <div className="hero-content">
+          <div className="hero-badge animate-pulse">
+            <span className="badge-dot"></span> Web3 Arena Live
           </div>
-          <div className="stat-item">
-            <span className="stat-label">Active Rooms</span>
-            <span className="stat-value">{formatNumber(lobbyStats.rooms)}</span>
-          </div>
-          <div className="stat-item">
-            <span className="stat-label">Matches</span>
-            <span className="stat-value">{formatNumber(lobbyStats.matches)}</span>
-          </div>
-          <div className="stat-item">
-            <span className="stat-label">Giveaways</span>
-            <span className="stat-value">{formatNumber(lobbyStats.giveaways)}</span>
+          <h1 className="hero-title">
+            Challenge players, <br />
+            win <span className="text-gradient">solana</span>
+          </h1>
+          <p className="hero-desc">
+            Rpsroom is the ultimate decentralized Rock-Paper-Scissors arena. Connect your wallet, select your stakes, and duel in high-fidelity 3D.
+          </p>
+          <div className="hero-actions">
+            <button className="btn-hero-primary" onClick={() => {
+              const rankedTier = displayTiers.find(t => t.is_ranked);
+              if (rankedTier) handleJoinTier(rankedTier);
+            }}>
+              Play Ranked
+            </button>
+            <button className="btn-hero-secondary" onClick={() => {
+              const createBtn = document.querySelector('.sidebar-create-btn');
+              if (createBtn) createBtn.click();
+            }}>
+              Create Custom Room
+            </button>
           </div>
         </div>
-
-        {/* Giveaway Pool Pill */}
-        {parseFloat(lobbyStats.poolSol || 0) > 0 && (
-          <div className="pool-live-badge">
-            <span className="pool-live-dot"></span>
-            <span className="pool-live-label">Prize Pool</span>
-            <span className="pool-live-amount">
-              <SolanaIcon size={12} style={{ marginRight: '4px' }} /> {parseFloat(lobbyStats.poolSol).toFixed(4)} SOL
+        
+        {/* Floating cards / Stats visual inside Hero */}
+        <div className="hero-visual">
+          <div className="hero-stat-card">
+            <span className="hero-stat-label">Total Volume</span>
+            <span className="hero-stat-value" style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <SolanaIcon size={14} style={{ marginRight: '6px' }} />
+              {parseFloat(lobbyStats.poolSol || 0).toFixed(2)} SOL
             </span>
           </div>
-        )}
-      </div>
+          <div className="hero-stat-card featured">
+            <span className="hero-stat-label">Weekly Winner</span>
+            <span className="hero-stat-value text-gradient">{topRanks[0]?.name || 'ADIOS MIOS'}</span>
+          </div>
+          <div className="hero-stat-card">
+            <span className="hero-stat-label">Active Rooms</span>
+            <span className="hero-stat-value">{formatNumber(lobbyStats.rooms || 0)} Live</span>
+          </div>
+          {/* Subtle background glow graphics */}
+          <div className="hero-glow-shape circle"></div>
+          <div className="hero-glow-shape triangle"></div>
+        </div>
+      </section>
 
-      {/* ── Room Tiers (Full Width) ── */}
+      {/* Global Live Stats Bar Ticker */}
+      <section className="lobby-stats-ticker" aria-label="Live Statistics">
+        <div className="ticker-item">
+          <span className="ticker-dot"></span>
+          <span className="ticker-label">Connected Wallets:</span>
+          <span className="ticker-val">{formatNumber(lobbyStats.wallets)}</span>
+        </div>
+        <div className="ticker-item">
+          <span className="ticker-dot"></span>
+          <span className="ticker-label">Total Matches Played:</span>
+          <span className="ticker-val">{formatNumber(lobbyStats.matches)}</span>
+        </div>
+        <div className="ticker-item">
+          <span className="ticker-dot"></span>
+          <span className="ticker-label">Active Giveaways:</span>
+          <span className="ticker-val">{formatNumber(lobbyStats.giveaways)} Live</span>
+        </div>
+      </section>
+
+      {/* Room Tiers Section */}
       <div className="room-tiers-section" id="room-tiers-row">
         {displayTiers.length === 0 ? (
           <div className="room-tiers-loading">Loading rooms…</div>
@@ -165,52 +203,48 @@ export default function Lobby() {
                   <div className="room-card-header">
                     <div>
                       <div className="room-type">{tier.is_ranked ? 'Ranked' : 'Casual'}</div>
-                      <div className="room-title">{tier.title}</div>
-                    </div>
-                    {tier.is_ranked && (
-                      <div className="ranked-badge">RANK</div>
-                    )}
-                  </div>
-
-                  <div className="mini-chart-container-wrapper">
-                    <div className="mini-chart-header">
-                      <span>ACTIVE PLAYERS PER MIN</span>
-                      <span>{tier.games_per_min || 0}</span>
-                    </div>
-                    <div className="mini-chart-container">
-                      {chartData.map((h, i) => (
-                        <div key={i} className="chart-bar" style={{ height: `${h > 0 ? Math.max((h / maxVal) * 100, 15) : 0}%` }} title={`${h} games`} />
-                      ))}
+                      <h3 className="room-title">{tier.title}</h3>
                     </div>
                   </div>
 
-                  <div className="room-card-line-stats">
-                    <div className="card-stat-col">
-                      <span className="stat-label">Players</span>
-                      <strong className="stat-val">{tier.active_players || 0}</strong>
+                  <div className="mini-chart-container" aria-label="Room Activity Chart">
+                    {chartData.map((h, i) => (
+                      <div 
+                        key={i} 
+                        className="chart-bar" 
+                        style={{ height: `${h > 0 ? Math.max((h / maxVal) * 100, 15) : 0}%` }} 
+                        title={`${h} games`} 
+                      />
+                    ))}
+                  </div>
+
+                  <div className="room-card-stats">
+                    <div className="card-stat">
+                      <span className="card-stat-label">Players</span>
+                      <strong className="card-stat-value">{tier.active_players || 0}</strong>
                     </div>
-                    <div className="card-stat-col">
-                      <span className="stat-label">Price</span>
-                      <strong className="stat-val" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-color)' }}>
+                    <div className="card-stat">
+                      <span className="card-stat-label">Bet</span>
+                      <strong className="card-stat-value" style={{ display: 'flex', alignItems: 'center', color: 'var(--accent-color)' }}>
                         <SolanaIcon size={10} style={{ marginRight: '2px' }} />
                         {parseFloat(tier.bet_sol).toFixed(2)}
                       </strong>
                     </div>
-                    <div className="card-stat-col">
-                      <span className="stat-label">Fee</span>
-                      <strong className="stat-val">{(parseFloat(tier.fee_rate) * 100).toFixed(0)}%</strong>
+                    <div className="card-stat">
+                      <span className="card-stat-label">Fee</span>
+                      <strong className="card-stat-value">{(parseFloat(tier.fee_rate) * 100).toFixed(0)}%</strong>
                     </div>
-                    <div className="card-stat-col">
-                      <span className="stat-label">Games</span>
-                      <strong className="stat-val">{tier.games_played || 0}</strong>
+                    <div className="card-stat">
+                      <span className="card-stat-label">Games</span>
+                      <strong className="card-stat-value">{tier.games_played || 0}</strong>
                     </div>
                   </div>
 
                   <button
-                    className={`btn-play-card ${tier.is_ranked ? 'ranked-btn' : ''}`}
+                    className="btn-play-card"
                     onClick={() => handleJoinTier(tier)}
                   >
-                    PLAY NOW
+                    {tier.is_ranked ? 'PLAY RANKED' : 'PLAY NOW'}
                   </button>
                 </div>
               );
