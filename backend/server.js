@@ -9,7 +9,7 @@ const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 const { Keypair, Connection, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL, sendAndConfirmTransaction } = require('@solana/web3.js');
 const nacl = require('tweetnacl');
-const bs58 = require('bs58');
+const bs58 = require('bs58').default;
 const db = require('./db');
 
 const app = express();
