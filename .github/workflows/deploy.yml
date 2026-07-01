@@ -47,6 +47,22 @@ jobs:
           cd backend && npm run lint
           cd ../frontend && npm run lint
 
+      - name: Run Backend Security Audit
+        run: |
+          cd backend
+          npm audit --audit-level=high || true
+
+      - name: Run Database Migrations
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: rps_user
+          DB_PASSWORD: rps_password
+          DB_NAME: rps_db
+        run: |
+          cd backend
+          node migrate.js
+
       - name: Run Backend Integration Tests (Jest)
         env:
           DB_HOST: localhost
@@ -56,6 +72,11 @@ jobs:
           DB_NAME: rps_db
         run: |
           cd backend
+          npm run test
+
+      - name: Run Frontend Tests (Vitest)
+        run: |
+          cd frontend
           npm run test
 
       - name: Build Frontend Application
