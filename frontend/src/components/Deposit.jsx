@@ -3,7 +3,7 @@ import { useGame } from '../context/GameContext';
 import SolanaIcon from './SolanaIcon';
 
 export default function Deposit({ onClose }) {
-  const { walletAddress, solBalance, custodialWallet } = useGame();
+  const { walletAddress, solBalance, custodialWallet, authFetch, triggerToast } = useGame();
   const [tab, setTab] = useState('deposit'); // 'deposit' | 'withdraw'
   const [copied, setCopied] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState('');
@@ -29,15 +29,19 @@ export default function Deposit({ onClose }) {
     if (!walletAddress || syncLoading) return;
     setSyncLoading(true);
     try {
-      const res = await fetch('/api/wallet/sync-balance', {
+      const res = await authFetch('/api/wallet/sync-balance', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ wallet: walletAddress })
       });
       const data = await res.json();
-      if (res.ok) setCurrentBalance(parseFloat(data.solBalance || 0));
+      if (res.ok) {
+        setCurrentBalance(parseFloat(data.solBalance || 0));
+        triggerToast('Balance successfully synchronized!', 'success');
+      }
+      else triggerToast('Sync failed: ' + (data.error || 'Unknown error'), 'error');
     } catch (err) {
       console.error('Sync failed', err);
+      triggerToast('Network error synchronizing balance.', 'error');
     } finally {
       setSyncLoading(false);
     }
@@ -50,9 +54,8 @@ export default function Deposit({ onClose }) {
     setWithdrawLoading(true);
     setWithdrawResult(null);
     try {
-      const res = await fetch('/api/withdraw', {
+      const res = await authFetch('/api/withdraw', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ wallet: walletAddress, solAmount: amount })
       });
       const data = await res.json();
@@ -213,7 +216,7 @@ export default function Deposit({ onClose }) {
                     <button
                       type="button"
                       className="btn-withdraw-max"
-                      onClick={() => setWithdrawAmount(currentBalance.toFixed(4))}
+                      onClick={() => setWithdrawAmount(Math.max(0, currentBalance - 0.001).toFixed(4))}
                     >
                       MAX
                     </button>

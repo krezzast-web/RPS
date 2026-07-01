@@ -9,7 +9,6 @@ import { useGame } from './context/GameContext';
 import SolanaIcon from './components/SolanaIcon';
 import './App.css';
 
-// GameApp holds all hooks — rendered only on non-admin routes
 function GameApp() {
   const {
     activeView,
@@ -18,7 +17,16 @@ function GameApp() {
     setCreateRoomModalOpen,
     createCustomRoom,
     walletAddress,
-    walletConnected
+    walletConnected,
+    // Custom Dialogs API
+    toastMessage,
+    toastType,
+    showToast,
+    setShowToast,
+    confirmConfig,
+    setConfirmConfig,
+    triggerConfirm,
+    triggerToast
   } = useGame();
 
   const [depositOpen, setDepositOpen] = useState(false);
@@ -34,15 +42,18 @@ function GameApp() {
 
   const handleLobbyNav = () => {
     if (activeView === 'game') {
-      const confirmLeave = window.confirm("Are you sure you want to leave the room? Your match progress will be lost.");
-      if (confirmLeave) leaveRoom();
+      triggerConfirm(
+        "Are you sure you want to leave the room? Your match progress will be lost.",
+        () => leaveRoom(),
+        () => {}
+      );
     }
   };
 
   const handleCreateSubmit = (e) => {
     e.preventDefault();
-    if (!roomName.trim()) { alert("Please enter a room name."); return; }
-    if (parseFloat(feeRate) < 3.0) { alert("Custom rooms require a minimum fee rate of 3%."); return; }
+    if (!roomName.trim()) { triggerToast("Please enter a room name.", "error"); return; }
+    if (parseFloat(feeRate) < 3.0) { triggerToast("Custom rooms require a minimum fee rate of 3%.", "error"); return; }
     createCustomRoom(roomName, parseFloat(betAmount), parseFloat(feeRate) / 100, hasPassword ? roomPassword : '', parseInt(expirationHours));
     setRoomName(''); setBetAmount('0.01'); setFeeRate('3.0'); setExpirationHours('24'); setHasPassword(false); setRoomPassword('');
     setCreateRoomModalOpen(false); // close the modal!
@@ -142,6 +153,28 @@ function GameApp() {
 
       {/* Profile Modal */}
       {profileOpen && walletAddress && <Profile wallet={walletAddress} onClose={() => setProfileOpen(false)} />}
+
+      {/* Custom Toast Alert */}
+      {showToast && (
+        <div className={`custom-toast ${toastType}`}>
+          <span className="toast-text">{toastMessage}</span>
+          <button className="toast-close" onClick={() => setShowToast(false)}>×</button>
+        </div>
+      )}
+
+      {/* Custom Confirm Dialog Modal */}
+      {confirmConfig && (
+        <div className="modal-overlay" style={{ zIndex: 1100 }}>
+          <div className="modal-card confirm-dialog" style={{ width: '360px', padding: '20px' }}>
+            <h3 className="modal-card-title" style={{ fontSize: '15px' }}>Confirm Action</h3>
+            <p style={{ margin: '15px 0', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>{confirmConfig.message}</p>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px' }}>
+              <button className="btn-modal-cancel" style={{ background: 'none', border: '1px solid #333', color: '#888', padding: '6px 12px', fontSize: '11px', borderRadius: '4px', cursor: 'pointer' }} onClick={() => { confirmConfig.onCancel?.(); setConfirmConfig(null); }}>Cancel</button>
+              <button className="btn-modal-submit" style={{ width: 'auto', padding: '6px 16px', fontSize: '11px', borderRadius: '4px' }} onClick={() => { confirmConfig.onConfirm?.(); setConfirmConfig(null); }}>Confirm</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

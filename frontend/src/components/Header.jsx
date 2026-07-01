@@ -5,6 +5,8 @@ import SolanaIcon from './SolanaIcon';
 export default function Header({ onOpenDeposit, onOpenWithdraw, onOpenProfile }) {
   const { walletConnected, walletAddress, solBalance, username, xUsername, linkXAccount, connectWallet, disconnectWallet } = useGame();
   const [showMenu, setShowMenu] = useState(false);
+  const [xModalOpen, setXModalOpen] = useState(false);
+  const [xModalVal, setXModalVal] = useState('');
 
   // Close menu on outside click
   useEffect(() => {
@@ -13,6 +15,18 @@ export default function Header({ onOpenDeposit, onOpenWithdraw, onOpenProfile })
     document.addEventListener('click', close);
     return () => document.removeEventListener('click', close);
   }, [showMenu]);
+
+  const handleLinkXSubmit = (e) => {
+    e.preventDefault();
+    if (xModalVal.trim()) {
+      linkXAccount(xModalVal.trim())
+        .then(() => {
+          setXModalOpen(false);
+          setXModalVal('');
+        })
+        .catch(() => {});
+    }
+  };
 
   return (
     <header className="header">
@@ -40,21 +54,47 @@ export default function Header({ onOpenDeposit, onOpenWithdraw, onOpenProfile })
                 <span className="chips-amount" style={{ textTransform: 'none', fontWeight: 600 }}>@{xUsername}</span>
               </div>
             ) : (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  const handle = prompt("Enter your Twitter (X) username (without @):");
-                  if (handle && handle.trim()) {
-                    linkXAccount(handle.trim())
-                      .then(() => alert("Twitter account linked successfully!"))
-                      .catch(err => alert("Failed to link Twitter account: " + err.message));
-                  }
-                }}
-                className="btn-connect-wallet"
-                style={{ padding: '0 12px', height: '30px', fontSize: '9.5px', background: 'transparent', border: '1px solid #1DA1F2', color: '#1DA1F2', whiteSpace: 'nowrap' }}
-              >
-                LINK X/TWITTER
-              </button>
+              <>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setXModalOpen(true);
+                  }}
+                  className="btn-connect-wallet"
+                  style={{ padding: '0 12px', height: '30px', fontSize: '9.5px', background: 'transparent', border: '1px solid #1DA1F2', color: '#1DA1F2', whiteSpace: 'nowrap' }}
+                >
+                  LINK X/TWITTER
+                </button>
+
+                {xModalOpen && (
+                  <div className="modal-overlay" style={{ zIndex: 1200 }} onClick={() => setXModalOpen(false)}>
+                    <div className="modal-card" style={{ width: '320px', padding: '20px' }} onClick={e => e.stopPropagation()}>
+                      <div className="modal-card-header" style={{ marginBottom: '15px' }}>
+                        <h3 className="modal-card-title" style={{ fontSize: '13px' }}>Link Twitter (X)</h3>
+                        <button className="modal-close-btn" style={{ fontSize: '16px' }} onClick={() => setXModalOpen(false)}>×</button>
+                      </div>
+                      <form onSubmit={handleLinkXSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        <div className="form-group" style={{ margin: 0 }}>
+                          <label className="form-label" style={{ fontSize: '10px' }}>Twitter Username (without @)</label>
+                          <input
+                            type="text"
+                            className="form-input"
+                            style={{ height: '32px', fontSize: '12px' }}
+                            placeholder="e.g. MyTwitterHandle"
+                            value={xModalVal}
+                            onChange={e => setXModalVal(e.target.value)}
+                            required
+                            autoFocus
+                          />
+                        </div>
+                        <button type="submit" className="btn-modal-submit" style={{ height: '32px', fontSize: '11px', fontWeight: 700 }}>
+                          LINK ACCOUNT
+                        </button>
+                      </form>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
 
             {/* SOL Balance with + button */}

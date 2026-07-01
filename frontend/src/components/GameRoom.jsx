@@ -37,13 +37,32 @@ export default function GameRoom() {
     searchAnotherRoom,
     waitNextOpponent,
     sendChatMessage,
-    likeMessage
+    likeMessage,
+    // Custom UX actions
+    triggerToast,
+    triggerConfirm,
+    authFetch
   } = useGame();
 
   const [inputVal, setInputVal] = useState('');
   const [copiedType, setCopiedType] = useState(null); // 'player' or 'opponent'
   const [copiedInvite, setCopiedInvite] = useState(false);
   const chatBottomRef = useRef(null);
+
+  // Local selection flow (selection needs manual confirmation before lock)
+  const [localSelection, setLocalSelection] = useState(null);
+
+  // Reset local selection when round starts
+  useEffect(() => {
+    setLocalSelection(null);
+  }, [roundNum]);
+
+  // Set chatTab safely if private tab is selected but removed
+  useEffect(() => {
+    if (chatTab === 'private') {
+      setChatTab('opponent');
+    }
+  }, [chatTab, setChatTab]);
 
   const handleCopyInvite = () => {
     navigator.clipboard.writeText(`https://rpsroom.io/room/${activeRoom?.id || 'custom'}`);
@@ -97,23 +116,53 @@ export default function GameRoom() {
   };
 
   const handleBlock = () => {
-    if (opponent) {
-      alert(`Blocked player ${opponent.name}. You will not be matched again.`);
-      leaveRoom();
-    }
+    if (!opponent) return;
+    triggerConfirm(
+      `Are you sure you want to block player ${opponent.name}? You will not be matched again.`,
+      async () => {
+        try {
+          const res = await authFetch(`/api/players/${opponent.wallet}/block`, { method: 'POST' });
+          if (res.ok) {
+            triggerToast(`Blocked player ${opponent.name}.`, 'success');
+            leaveRoom();
+          } else {
+            triggerToast('Failed to block player.', 'error');
+          }
+        } catch (e) {
+          triggerToast('Error blocking player.', 'error');
+        }
+      },
+      () => {}
+    );
   };
 
   const handleReport = () => {
-    if (opponent) {
-      alert(`Reported player ${opponent.name} for unsportsmanlike behavior.`);
-    }
+    if (!opponent) return;
+    triggerConfirm(
+      `Report player ${opponent.name} for unsportsmanlike behavior?`,
+      async () => {
+        try {
+          const res = await authFetch(`/api/players/${opponent.wallet}/report`, {
+            method: 'POST',
+            body: JSON.stringify({ reason: 'Reported during match' })
+          });
+          if (res.ok) {
+            triggerToast(`Reported player ${opponent.name}. Our staff will review this match.`, 'success');
+          } else {
+            triggerToast('Failed to submit report.', 'error');
+          }
+        } catch (e) {
+          triggerToast('Error submitting report.', 'error');
+        }
+      },
+      () => {}
+    );
   };
 
   // Filter messages based on active tab
   const filteredMessages = chatMessages.filter(msg => {
     if (chatTab === 'general') return msg.tab === 'general' || msg.tab === 'opponent';
-    if (chatTab === 'opponent') return msg.tab === 'opponent';
-    return msg.tab === 'private';
+    return msg.tab === 'opponent'; // no private tab logic
   });
 
   return (
@@ -136,11 +185,11 @@ export default function GameRoom() {
             </div>
             <div className="game-meta-item">
               <span className="game-meta-label">Bet</span>
-              <span className="game-meta-val">{activeRoom?.price || '0.75'} SOL</span>
+              <span className="game-meta-val">{parseFloat(activeRoom?.betSol || 0).toFixed(3)} SOL</span>
             </div>
             <div className="game-meta-item">
               <span className="game-meta-label">Fee</span>
-              <span className="game-meta-val">{activeRoom?.fee || '0.5'}%</span>
+              <span className="game-meta-val">{(parseFloat(activeRoom?.feeRate || 0) * 100).toFixed(0)}%</span>
             </div>
           </div>
 
@@ -386,37 +435,54 @@ export default function GameRoom() {
           )}
         </section>
 
-        {/* Choice Selection Panel */}
-        <section className="choice-selection-bar" aria-label="Make your selection">
-          {['R', 'P', 'S'].map((choice) => {
-            const label = choice === 'R' ? 'ROCK' : choice === 'P' ? 'PAPER' : 'SCISSORS';
-            const isSelected = playerSelection === choice;
+        {/* Choice Selection Panel with Manual Confirmation */}
+        <section className="choice-selection-bar-wrapper" style={{ display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center', width: '100%', padding: '0 20px 20px' }}>
+          <div className="choice-selection-bar" style={{ width: '100%', display: 'flex', gap: '10px' }} aria-label="Make your selection">
+            {['R', 'P', 'S'].map((choice) => {
+              const label = choice === 'R' ? 'ROCK' : choice === 'P' ? 'PAPER' : 'SCISSORS';
+              const isSelected = localSelection === choice;
 
-            return (
-              <button
-                key={choice}
-                className={`choice-card-btn ${isSelected ? 'selected' : ''}`}
-                onClick={() => makeMove(choice)}
-                disabled={matchmakingState !== 'playing_10s' || userLockedSelection}
-                aria-label={`Select ${label}`}
-              >
-                <div className={`choice-icon ${getMoveIcon(choice)}`}></div>
-                <span className="choice-label">{label}</span>
-              </button>
-            );
-          })}
+              return (
+                <button
+                  key={choice}
+                  className={`choice-card-btn ${isSelected ? 'selected' : ''}`}
+                  onClick={() => setLocalSelection(choice)}
+                  disabled={matchmakingState !== 'playing_10s' || userLockedSelection}
+                  aria-label={`Select ${label}`}
+                  style={{ flex: 1, border: isSelected ? '2px solid var(--accent-color)' : '1px solid var(--border-color)' }}
+                >
+                  <div className={`choice-icon ${getMoveIcon(choice)}`}></div>
+                  <span className="choice-label">{label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {localSelection && !userLockedSelection && matchmakingState === 'playing_10s' && (
+            <button
+              className="btn-modal-submit animate-slide-down"
+              onClick={() => makeMove(localSelection)}
+              style={{
+                width: '100%',
+                maxHeight: '44px',
+                background: 'var(--accent-color)',
+                color: '#000',
+                fontWeight: 800,
+                fontSize: '12px',
+                letterSpacing: '1px',
+                borderRadius: '8px',
+                cursor: 'pointer'
+              }}
+            >
+              CONFIRM SELECTION
+            </button>
+          )}
         </section>
       </div>
 
       {/* Chat Column */}
       <div className="gameroom-chat-col">
         <div className="chat-tabs">
-          <button 
-            className={`chat-tab ${chatTab === 'private' ? 'active' : ''}`}
-            onClick={() => setChatTab('private')}
-          >
-            Private Chat
-          </button>
           <button 
             className={`chat-tab ${chatTab === 'opponent' ? 'active' : ''}`}
             onClick={() => setChatTab('opponent')}

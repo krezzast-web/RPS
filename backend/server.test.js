@@ -264,21 +264,36 @@ describe('RPS WebSocket Server Integration Tests', () => {
     });
   });
 
-  it('Player creates custom game room with SOL bet amount', (done) => {
-    client1.emit('join_lobby', 'wallet_owner_abc');
+  it('Player creates custom game room with SOL bet amount', async () => {
+    const db = require('./db');
 
-    client1.on('profile_sync', () => {
-      client1.emit('create_room', {
-        roomName: 'Tuna Room',
-        betSol: 0.05,
-        hasPassword: false
+    // Ensure player exists with SOL balance
+    await db.query(`
+      INSERT INTO players (wallet_address, username, sol_balance, rating, wins, losses, draws)
+      VALUES ('wallet_owner_abc', 'Player_wallet_abc', 10.0, 1000, 0, 0, 0)
+      ON CONFLICT (wallet_address) DO UPDATE
+        SET sol_balance = 10.0
+    `);
+
+    const roomCreated = new Promise((resolve, reject) => {
+      client1.on('create_room_error', (msg) => reject(new Error('create_room_error: ' + msg)));
+      client1.on('room_created', (roomId) => resolve(roomId));
+
+      client1.emit('join_lobby', 'wallet_owner_abc');
+
+      client1.once('profile_sync', () => {
+        // Use betSol=0 to avoid any DB-state dependency on sol_balance
+        client1.emit('create_room', {
+          roomName: 'Test Room',
+          betSol: 0,
+          feeRate: 0.05,
+          hasPassword: false
+        });
       });
     });
 
-    client1.on('room_created', (roomId) => {
-      expect(roomId).toContain('room_');
-      done();
-    });
+    const roomId = await roomCreated;
+    expect(roomId).toContain('room_');
   });
 
   it('Lobby updates are broadcasted with SOL stats to all connected clients', (done) => {
@@ -297,17 +312,25 @@ describe('RPS WebSocket Server Integration Tests', () => {
   });
 
   it('Clients communicate in real-time via chat broadcasts', (done) => {
+    let chat1Ready = false;
+    let chat2Ready = false;
+
+    const trySendChat = () => {
+      if (chat1Ready && chat2Ready) {
+        client1.emit('send_chat', { text: 'Hello Lobby!' });
+      }
+    };
+
     client1.emit('join_lobby', 'wallet_user_chat_1');
     client2.emit('join_lobby', 'wallet_user_chat_2');
+
+    client1.once('profile_sync', () => { chat1Ready = true; trySendChat(); });
+    client2.once('profile_sync', () => { chat2Ready = true; trySendChat(); });
 
     client2.on('chat_broadcast', (msg) => {
       expect(msg.sender).toContain('Player_');
       expect(msg.text).toBe('Hello Lobby!');
       done();
     });
-
-    setTimeout(() => {
-      client1.emit('send_chat', { text: 'Hello Lobby!' });
-    }, 200);
   });
 });

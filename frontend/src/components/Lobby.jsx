@@ -12,7 +12,9 @@ export default function Lobby() {
     roomTiers,
     walletConnected,
     walletAddress,
-    connectWallet
+    connectWallet,
+    authFetch,
+    triggerToast
   } = useGame();
 
   const [copiedId, setCopiedId] = useState(null);
@@ -23,23 +25,26 @@ export default function Lobby() {
   const [tweetUrls, setTweetUrls] = useState({});
   const [verifying, setVerifying] = useState({});
 
+  // Password protected room join states
+  const [passwordPromptRoom, setPasswordPromptRoom] = useState(null);
+  const [passwordInput, setPasswordInput] = useState('');
+
   const handleVerifyShare = async (giveawayId) => {
-    if (!walletAddress) { alert("Please connect your wallet first!"); return; }
+    if (!walletAddress) { triggerToast('Please connect your wallet first!', 'error'); return; }
     const url = tweetUrls[giveawayId];
-    if (!url || !url.trim()) { alert("Please enter a valid tweet URL."); return; }
+    if (!url || !url.trim()) { triggerToast('Please enter a valid tweet URL.', 'error'); return; }
     setVerifying(prev => ({ ...prev, [giveawayId]: true }));
     try {
-      const res = await fetch(`/api/giveaways/${giveawayId}/verify-share`, {
+      const res = await authFetch(`/api/giveaways/${giveawayId}/verify-share`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ wallet: walletAddress, tweetUrl: url.trim() })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      alert("Verification successful! You have entered the giveaway.");
+      triggerToast('Verification successful! You have entered the giveaway.', 'success');
       setTweetUrls(prev => ({ ...prev, [giveawayId]: '' }));
     } catch (err) {
-      alert("Verification failed: " + err.message);
+      triggerToast('Verification failed: ' + err.message, 'error');
     } finally {
       setVerifying(prev => ({ ...prev, [giveawayId]: false }));
     }
@@ -52,8 +57,22 @@ export default function Lobby() {
   };
 
   const handleJoin = (room) => {
-    if (!walletConnected) connectWallet();
-    joinRoom(room);
+    if (!walletConnected) { connectWallet(); return; }
+    if (room.hasPassword) {
+      setPasswordPromptRoom(room);
+      setPasswordInput('');
+    } else {
+      joinRoom(room);
+    }
+  };
+
+  const handlePasswordSubmit = (e) => {
+    e.preventDefault();
+    if (passwordPromptRoom) {
+      joinRoom(passwordPromptRoom, passwordInput);
+      setPasswordPromptRoom(null);
+      setPasswordInput('');
+    }
   };
 
   const handleJoinTier = (tier) => {
@@ -406,6 +425,36 @@ export default function Lobby() {
                     ))
                   )}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Password Prompt Modal for Custom Rooms */}
+          {passwordPromptRoom && (
+            <div className="modal-overlay" style={{ zIndex: 1200 }} onClick={() => setPasswordPromptRoom(null)}>
+              <div className="modal-card" style={{ width: '320px', padding: '20px' }} onClick={e => e.stopPropagation()}>
+                <div className="modal-card-header" style={{ marginBottom: '15px' }}>
+                  <h3 className="modal-card-title" style={{ fontSize: '13px' }}>Password Required</h3>
+                  <button className="modal-close-btn" style={{ fontSize: '16px' }} onClick={() => setPasswordPromptRoom(null)}>×</button>
+                </div>
+                <form onSubmit={handlePasswordSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontSize: '10px' }}>Enter Room Password</label>
+                    <input
+                      type="password"
+                      className="form-input"
+                      style={{ height: '32px', fontSize: '12px' }}
+                      placeholder="Room Password"
+                      value={passwordInput}
+                      onChange={e => setPasswordInput(e.target.value)}
+                      required
+                      autoFocus
+                    />
+                  </div>
+                  <button type="submit" className="btn-modal-submit" style={{ height: '32px', fontSize: '11px', fontWeight: 700 }}>
+                    JOIN GAME
+                  </button>
+                </form>
               </div>
             </div>
           )}

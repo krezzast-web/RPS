@@ -6,23 +6,110 @@ const crypto = require('crypto');
 const { Server } = require('socket.io');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
 const { Keypair, Connection, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL, sendAndConfirmTransaction } = require('@solana/web3.js');
+const nacl = require('tweetnacl');
+const bs58 = require('bs58');
 const db = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-const JWT_SECRET = process.env.JWT_SECRET || 'rps_admin_jwt_secret_2024';
-const ENCRYPTION_KEY = process.env.WALLET_ENCRYPTION_KEY || 'rps_wallet_key_32bytes_padded!!!'; // Must be 32 chars in prod
 
-app.use(cors());
-app.use(express.json());
+// ─────────────────────────────────────────────
+// Security: Warn loudly if secrets not set via env
+// ─────────────────────────────────────────────
+
+const JWT_SECRET = process.env.JWT_SECRET || (() => {
+  console.warn('⚠️  WARNING: JWT_SECRET not set in env. Using insecure default. Set it in production!');
+  return 'rps_admin_jwt_secret_2024';
+})();
+
+const ENCRYPTION_KEY = process.env.WALLET_ENCRYPTION_KEY || (() => {
+  console.warn('⚠️  WARNING: WALLET_ENCRYPTION_KEY not set in env. Using insecure default. Set it in production!');
+  return 'rps_wallet_key_32bytes_padded!!!';
+})();
+
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'http://localhost:5173';
+
+// ─────────────────────────────────────────────
+// CORS Setup
+// ─────────────────────────────────────────────
+
+app.use(cors({
+  origin: [ALLOWED_ORIGIN, 'https://rps.flappycat.fun', 'http://localhost:5173', 'http://localhost:4173'],
+  credentials: true,
+}));
+app.use(express.json({ limit: '10kb' })); // Limit payload size
+
+// ─────────────────────────────────────────────
+// Rate Limiting
+// ─────────────────────────────────────────────
+
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 500,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' }
+});
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: 'Too many auth attempts, please try again later.' }
+});
+const withdrawLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  message: { error: 'Too many withdrawal attempts per hour.' }
+});
+const verifyShareLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 20,
+  message: { error: 'Too many verify attempts per hour.' }
+});
+const adminLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: 'Too many login attempts.' }
+});
+
+app.use(generalLimiter);
+
+// ─────────────────────────────────────────────
+// HTTP Server & Socket.io
+// ─────────────────────────────────────────────
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] }
+  cors: {
+    origin: [ALLOWED_ORIGIN, 'https://rps.flappycat.fun', 'http://localhost:5173', 'http://localhost:4173'],
+    methods: ['GET', 'POST']
+  }
 });
 
 const activeGames = new Map();
+
+// ─────────────────────────────────────────────
+// Wallet Auth — Nonce/Signature System
+// ─────────────────────────────────────────────
+
+const authNonces = new Map(); // wallet -> { nonce, expiresAt }
+
+function generateNonce() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function buildAuthMessage(nonce) {
+  return `Sign this message to authenticate with RPS Room.\nNonce: ${nonce}`;
+}
+
+// Clean up expired nonces every 10 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [wallet, entry] of authNonces) {
+    if (entry.expiresAt < now) authNonces.delete(wallet);
+  }
+}, 10 * 60 * 1000);
 
 // ─────────────────────────────────────────────
 // Encryption helpers for custodial private keys
@@ -78,7 +165,6 @@ async function loadKeypairFromDb(encryptedSecret) {
   return Keypair.fromSecretKey(secretKey);
 }
 
-// Send SOL on-chain from a custodial wallet to a destination address
 async function sendSolOnChain(encryptedSecret, toAddress, solAmount, rpcUrl) {
   const keypair = await loadKeypairFromDb(encryptedSecret);
   const connection = getSolanaConnection(rpcUrl);
@@ -95,8 +181,10 @@ async function sendSolOnChain(encryptedSecret, toAddress, solAmount, rpcUrl) {
 }
 
 // ─────────────────────────────────────────────
-// Helpers
+// Game Logic Helpers
 // ─────────────────────────────────────────────
+
+const VALID_MOVES = new Set(['R', 'P', 'S']);
 
 function getRoundWinner(move1, move2) {
   if (move1 === move2) return 'draw';
@@ -107,6 +195,10 @@ function getRoundWinner(move1, move2) {
   ) return 'player1';
   return 'player2';
 }
+
+// ─────────────────────────────────────────────
+// Middleware
+// ─────────────────────────────────────────────
 
 function adminAuth(req, res, next) {
   const header = req.headers.authorization;
@@ -121,6 +213,25 @@ function adminAuth(req, res, next) {
   }
 }
 
+function walletAuth(req, res, next) {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Authentication required. Please reconnect your wallet.' });
+  }
+  try {
+    const decoded = jwt.verify(header.split(' ')[1], JWT_SECRET);
+    if (!decoded.wallet) return res.status(401).json({ error: 'Invalid session token.' });
+    req.walletAddress = decoded.wallet;
+    next();
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired session. Please reconnect your wallet.' });
+  }
+}
+
+// ─────────────────────────────────────────────
+// Platform Config
+// ─────────────────────────────────────────────
+
 async function getConfig() {
   const res = await db.query('SELECT key, value FROM platform_config');
   const config = {};
@@ -128,13 +239,18 @@ async function getConfig() {
   return config;
 }
 
+// ─────────────────────────────────────────────
+// Lobby Broadcast
+// ─────────────────────────────────────────────
+
 async function broadcastLobbyState() {
   try {
     const [roomsRes, leaderRes, statsRes, generalMsgRes, giveawaysRes, tiersRes] = await Promise.all([
       db.query(`
         SELECT r.id, r.name, r.bet_sol, r.fee_rate, r.status,
                (CASE WHEN r.player2_wallet IS NOT NULL THEN 2 ELSE 1 END) as players,
-               p1.username as player1_name, p2.username as player2_name
+               p1.username as player1_name, p2.username as player2_name,
+               (CASE WHEN r.password IS NOT NULL AND r.password != '' THEN TRUE ELSE FALSE END) as has_password
         FROM rooms r
         LEFT JOIN players p1 ON r.player1_wallet = p1.wallet_address
         LEFT JOIN players p2 ON r.player2_wallet = p2.wallet_address
@@ -159,7 +275,7 @@ async function broadcastLobbyState() {
       `),
       db.query(`
         SELECT g.id, g.title, g.description, g.prize_sol, g.winner_count, g.status,
-               to_char(g.end_date, 'DD.MM.YYYY') as end_date_formatted, g.end_date
+               to_char(g.end_date, 'DD.MM.YYYY') as end_date_formatted, g.end_date, g.created_at
         FROM giveaways g WHERE g.status = 'ACTIVE' ORDER BY g.created_at DESC LIMIT 10
       `),
       db.query(`
@@ -209,7 +325,8 @@ async function broadcastLobbyState() {
         betSol: parseFloat(r.bet_sol),
         feeRate: parseFloat(r.fee_rate),
         player1: r.player1_name,
-        player2: r.player2_name
+        player2: r.player2_name,
+        hasPassword: r.has_password
       })),
       topRanks: leaderRes.rows.map((p, idx) => ({
         id: idx + 1,
@@ -270,7 +387,6 @@ io.on('connection', (socket) => {
 
     const defaultUsername = `Player_${wallet.substring(0, 6)}`;
     try {
-      // Create player if not exists (no SOL balance — they must deposit)
       await db.query(
         `INSERT INTO players (wallet_address, username, rating, sol_balance)
          VALUES ($1, $2, 1000, 0)
@@ -278,7 +394,6 @@ io.on('connection', (socket) => {
         [wallet, defaultUsername]
       );
 
-      // Generate custodial wallet if none exists
       const playerRes = await db.query(
         'SELECT username, rating, sol_balance, wins, losses, draws, custodial_wallet_address, custodial_wallet_secret, x_username FROM players WHERE wallet_address = $1',
         [wallet]
@@ -314,15 +429,41 @@ io.on('connection', (socket) => {
 
   socket.on('create_room', async ({ roomName, betSol, feeRate, hasPassword, roomPassword, expirationHours }) => {
     if (!userWallet) return;
-    const roomId = `room_${Date.now()}`;
+
+    // Validate fee rate on server — minimum 3% for custom rooms
     const cleanFee = parseFloat(feeRate !== undefined ? feeRate : 0.02);
+    if (cleanFee < 0.03) {
+      socket.emit('create_room_error', 'Custom rooms require a minimum fee rate of 3%.');
+      return;
+    }
+
+    // Check player balance before creating
+    const balCheck = await db.query('SELECT sol_balance FROM players WHERE wallet_address = $1', [userWallet]);
+    const playerBalance = parseFloat(balCheck.rows[0]?.sol_balance || 0);
+    const betAmount = betSol !== undefined && betSol !== null ? parseFloat(betSol) : 0.01;
+    if (playerBalance < betAmount) {
+      socket.emit('create_room_error', `Insufficient balance. Need ${betAmount} SOL to create this room. Please deposit first.`);
+      return;
+    }
+
+    // Cap: max 3 open custom rooms per wallet
+    const openRoomsCount = await db.query(
+      "SELECT COUNT(*) FROM rooms WHERE player1_wallet = $1 AND status = 'OPEN' AND id LIKE 'room_%'",
+      [userWallet]
+    );
+    if (parseInt(openRoomsCount.rows[0].count) >= 3) {
+      socket.emit('create_room_error', 'You already have 3 open custom rooms. Close one before creating another.');
+      return;
+    }
+
+    const roomId = `room_${Date.now()}`;
     const hours = parseInt(expirationHours || 24);
     const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000);
     try {
       await db.query(
         `INSERT INTO rooms (id, name, bet_sol, fee_rate, status, password, player1_wallet, expires_at)
          VALUES ($1, $2, $3, $4, 'OPEN', $5, $6, $7)`,
-        [roomId, roomName.toUpperCase(), parseFloat(betSol || 0.01), cleanFee, hasPassword ? roomPassword : null, userWallet, expiresAt]
+        [roomId, roomName.toUpperCase(), betAmount, cleanFee, hasPassword ? roomPassword : null, userWallet, expiresAt]
       );
       socket.emit('room_created', roomId);
       broadcastLobbyState();
@@ -336,12 +477,10 @@ io.on('connection', (socket) => {
     try {
       let targetRoomId = roomId;
 
-      // Handle tier matchmaking
       if (roomId.startsWith('tier_')) {
         const parts = roomId.split('_');
-        const tierId = parts[1]; // e.g. "shrimp"
+        const tierId = parts[1];
 
-        // Get tier settings from DB
         const tierRes = await db.query('SELECT * FROM room_tiers WHERE id = $1', [tierId]);
         if (!tierRes.rows[0]) {
           socket.emit('join_error', 'Invalid room tier');
@@ -349,7 +488,6 @@ io.on('connection', (socket) => {
         }
         const tier = tierRes.rows[0];
 
-        // 1. Look for an open room of this tier that is NOT owned by the current player
         const openRoomRes = await db.query(`
           SELECT id FROM rooms
           WHERE status = 'OPEN'
@@ -362,7 +500,6 @@ io.on('connection', (socket) => {
         if (openRoomRes.rows[0]) {
           targetRoomId = openRoomRes.rows[0].id;
         } else {
-          // Check if this player already has an open room for this tier
           const myOpenRoomRes = await db.query(`
             SELECT id FROM rooms
             WHERE status = 'OPEN'
@@ -374,7 +511,6 @@ io.on('connection', (socket) => {
           if (myOpenRoomRes.rows[0]) {
             targetRoomId = myOpenRoomRes.rows[0].id;
           } else {
-            // Create a new open room for this tier
             await db.query(`
               INSERT INTO rooms (id, name, bet_sol, fee_rate, status, player1_wallet)
               VALUES ($1, $2, $3, $4, 'OPEN', $5)
@@ -388,7 +524,6 @@ io.on('connection', (socket) => {
             targetRoomId = roomId;
           }
         }
-        // Track the join event to build dynamic user graphs
         await db.query('INSERT INTO room_joins (room_tier, wallet_address) VALUES ($1, $2)', [tierId, userWallet]);
       }
 
@@ -396,11 +531,17 @@ io.on('connection', (socket) => {
       if (!roomRes.rows[0]) { socket.emit('join_error', 'Room does not exist'); return; }
 
       const room = roomRes.rows[0];
+
+      // Reject if room is expired
+      if (room.expires_at && new Date(room.expires_at) < new Date()) {
+        socket.emit('join_error', 'This room has expired.');
+        return;
+      }
+
       if (room.password && room.password !== password && room.player1_wallet !== userWallet) {
         socket.emit('join_error', 'Incorrect password'); return;
       }
 
-      // Check player has enough SOL to play
       const playerRes = await db.query('SELECT sol_balance FROM players WHERE wallet_address = $1', [userWallet]);
       const solBalance = parseFloat(playerRes.rows[0]?.sol_balance || 0);
       const betSol = parseFloat(room.bet_sol);
@@ -434,7 +575,8 @@ io.on('connection', (socket) => {
           player1Ready: false, player2Ready: false,
           player1Move: null, player2Move: null,
           roundNum: 1, player1Score: 0, player2Score: 0,
-          history1: [], history2: [], timer: null
+          history1: [], history2: [], timer: null,
+          readyTimeoutTimer: null
         });
       } else {
         const game = activeGames.get(targetRoomId);
@@ -442,6 +584,22 @@ io.on('connection', (socket) => {
       }
 
       const game = activeGames.get(targetRoomId);
+
+      // Start ready-up timeout when both players are in room
+      if (pData.player2_wallet && !game.player1Ready && !game.player2Ready) {
+        if (game.readyTimeoutTimer) clearTimeout(game.readyTimeoutTimer);
+        game.readyTimeoutTimer = setTimeout(async () => {
+          // If neither is ready after 5 minutes, close the room
+          const currentGame = activeGames.get(targetRoomId);
+          if (currentGame && !currentGame.player1Ready && !currentGame.player2Ready) {
+            io.to(targetRoomId).emit('room_timeout', { message: 'Room closed: no one readied up in 5 minutes.' });
+            await db.query('DELETE FROM rooms WHERE id = $1', [targetRoomId]);
+            activeGames.delete(targetRoomId);
+            broadcastLobbyState();
+          }
+        }, 5 * 60 * 1000);
+      }
+
       io.to(targetRoomId).emit('room_sync', {
         roomId: targetRoomId, title: pData.name,
         betSol: parseFloat(pData.bet_sol), feeRate: parseFloat(pData.fee_rate),
@@ -464,6 +622,12 @@ io.on('connection', (socket) => {
 
     if (userWallet === game.player1Wallet) game.player1Ready = true;
     else if (userWallet === game.player2Wallet) game.player2Ready = true;
+
+    // Cancel ready timeout since at least one player is engaging
+    if (game.readyTimeoutTimer) {
+      clearTimeout(game.readyTimeoutTimer);
+      game.readyTimeoutTimer = null;
+    }
 
     if (game.player1Ready && game.player2Ready) {
       io.to(currentRoomId).emit('timer_sync', { timerType: 'cooldown_3s', percent: 100, remaining: 3 });
@@ -494,6 +658,11 @@ io.on('connection', (socket) => {
 
   socket.on('submit_move', (move) => {
     if (!currentRoomId) return;
+    // Validate move is one of the three valid options
+    if (!VALID_MOVES.has(move)) {
+      socket.emit('move_error', 'Invalid move. Must be R, P, or S.');
+      return;
+    }
     const game = activeGames.get(currentRoomId);
     if (!game) return;
     if (userWallet === game.player1Wallet) game.player1Move = move;
@@ -512,15 +681,22 @@ io.on('connection', (socket) => {
     game.history1.unshift(move1);
     game.history2.unshift(move2);
 
+    // Use DB transaction to atomically update all balances
+    const client = await db.pool.connect();
     try {
-      const roomRes = await db.query('SELECT bet_sol, fee_rate, player1_wallet FROM rooms WHERE id = $1', [roomId]);
+      await client.query('BEGIN');
+
+      const roomRes = await client.query('SELECT bet_sol, fee_rate, player1_wallet FROM rooms WHERE id = $1', [roomId]);
       const { bet_sol, fee_rate, player1_wallet: creatorWallet } = roomRes.rows[0];
       const betSol = parseFloat(bet_sol);
-      const feeRate = parseFloat(fee_rate);
-      const feeSol = betSol * 2 * feeRate;       // fee of total pot
-      const winnerReceives = betSol * 2 - feeSol; // net winner payout
 
-      // Determine if it is a custom room (starts with room_)
+      // Read fee rates from platform config
+      const config = await getConfig();
+      const gameFeeRate = parseFloat(config.game_fee_rate || fee_rate);
+      const feeRate = parseFloat(fee_rate); // room-level fee takes precedence
+      const feeSol = betSol * 2 * feeRate;
+      const winnerReceives = betSol * 2 - feeSol;
+
       const isCustomRoom = roomId.startsWith('room_');
       let giveawayContribution = 0;
       let platformFee = 0;
@@ -528,19 +704,17 @@ io.on('connection', (socket) => {
 
       if (winner !== 'draw') {
         if (isCustomRoom) {
-          // Platform keeps 1.5% of total pot, host gets the rest
           const platformShareSol = betSol * 2 * 0.015;
-          giveawayContribution = platformShareSol * 0.30;
+          giveawayContribution = platformShareSol * parseFloat(config.giveaway_pool_rate || 0.30);
           platformFee = platformShareSol - giveawayContribution;
           hostFeeSol = Math.max(0, feeSol - platformShareSol);
 
-          // Credit host fee share directly to their game wallet balance
           if (hostFeeSol > 0 && creatorWallet) {
-            await db.query('UPDATE players SET sol_balance = sol_balance + $1 WHERE wallet_address = $2', [hostFeeSol, creatorWallet]);
+            await client.query('UPDATE players SET sol_balance = sol_balance + $1 WHERE wallet_address = $2', [hostFeeSol, creatorWallet]);
           }
         } else {
-          // Normal room: 30% to giveaways, 70% to platform fees
-          giveawayContribution = feeSol * 0.30;
+          const poolRate = parseFloat(config.giveaway_pool_rate || 0.30);
+          giveawayContribution = feeSol * poolRate;
           platformFee = feeSol - giveawayContribution;
         }
       }
@@ -550,38 +724,36 @@ io.on('connection', (socket) => {
       if (winner === 'player1') {
         game.player1Score++;
         winnerWallet = game.player1Wallet;
-        await db.query('UPDATE players SET rating = rating + 25, wins = wins + 1, sol_balance = sol_balance + $1 WHERE wallet_address = $2', [winnerReceives - betSol, game.player1Wallet]);
-        await db.query('UPDATE players SET rating = GREATEST(100, rating - 15), losses = losses + 1, sol_balance = GREATEST(0, sol_balance - $1) WHERE wallet_address = $2', [betSol, game.player2Wallet]);
+        await client.query('UPDATE players SET rating = rating + 25, wins = wins + 1, sol_balance = sol_balance + $1 WHERE wallet_address = $2', [winnerReceives - betSol, game.player1Wallet]);
+        await client.query('UPDATE players SET rating = GREATEST(100, rating - 15), losses = losses + 1, sol_balance = GREATEST(0, sol_balance - $1) WHERE wallet_address = $2', [betSol, game.player2Wallet]);
       } else if (winner === 'player2') {
         game.player2Score++;
         winnerWallet = game.player2Wallet;
-        await db.query('UPDATE players SET rating = GREATEST(100, rating - 15), losses = losses + 1, sol_balance = GREATEST(0, sol_balance - $1) WHERE wallet_address = $2', [betSol, game.player1Wallet]);
-        await db.query('UPDATE players SET rating = rating + 25, wins = wins + 1, sol_balance = sol_balance + $1 WHERE wallet_address = $2', [winnerReceives - betSol, game.player2Wallet]);
+        await client.query('UPDATE players SET rating = GREATEST(100, rating - 15), losses = losses + 1, sol_balance = GREATEST(0, sol_balance - $1) WHERE wallet_address = $2', [betSol, game.player1Wallet]);
+        await client.query('UPDATE players SET rating = rating + 25, wins = wins + 1, sol_balance = sol_balance + $1 WHERE wallet_address = $2', [winnerReceives - betSol, game.player2Wallet]);
       } else {
-        // Draw — no SOL changes, just stat update
-        await db.query('UPDATE players SET draws = draws + 1 WHERE wallet_address = $1', [game.player1Wallet]);
-        await db.query('UPDATE players SET draws = draws + 1 WHERE wallet_address = $1', [game.player2Wallet]);
+        await client.query('UPDATE players SET draws = draws + 1 WHERE wallet_address = $1', [game.player1Wallet]);
+        await client.query('UPDATE players SET draws = draws + 1 WHERE wallet_address = $1', [game.player2Wallet]);
       }
 
       if (winner !== 'draw') {
-        // Accumulate platform fee
-        await db.query(
+        await client.query(
           "UPDATE platform_config SET value = CAST(CAST(value AS DECIMAL) + $1 AS TEXT), updated_at = NOW() WHERE key = 'platform_fees_collected_sol'",
           [platformFee]
         );
-        // Accumulate giveaway pool
-        await db.query(
+        await client.query(
           "UPDATE platform_config SET value = CAST(CAST(value AS DECIMAL) + $1 AS TEXT), updated_at = NOW() WHERE key = 'giveaway_pool_sol'",
           [giveawayContribution]
         );
       }
 
-      // Record match
-      await db.query(
+      await client.query(
         `INSERT INTO matches (room_id, player1_wallet, player2_wallet, winner_wallet, player1_move, player2_move, bet_sol, fee_sol)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [roomId, game.player1Wallet, game.player2Wallet, winnerWallet, move1, move2, betSol, winner !== 'draw' ? feeSol : 0]
       );
+
+      await client.query('COMMIT');
 
       io.to(roomId).emit('round_resolved', {
         player1Move: move1, player2Move: move2,
@@ -609,7 +781,10 @@ io.on('connection', (socket) => {
       }, 3500);
 
     } catch (err) {
-      console.error('Round resolution error:', err.message);
+      await client.query('ROLLBACK');
+      console.error('Round resolution error, rolled back:', err.message);
+    } finally {
+      client.release();
     }
   }
 
@@ -619,14 +794,97 @@ io.on('connection', (socket) => {
     const noMove1 = !game.player1Move;
     const noMove2 = !game.player2Move;
 
+    // Both AFK — draw, no money moves
     if (noMove1 && noMove2) {
       io.to(roomId).emit('round_resolved', { player1Move: null, player2Move: null, player1Score: game.player1Score, player2Score: game.player2Score, winner: 'draw', roundNum: game.roundNum });
-    } else if (noMove1) {
-      game.player2Score++;
-      io.to(roomId).emit('round_resolved', { player1Move: null, player2Move: game.player2Move, player1Score: game.player1Score, player2Score: game.player2Score, winner: 'player2', roundNum: game.roundNum });
-    } else if (noMove2) {
-      game.player1Score++;
-      io.to(roomId).emit('round_resolved', { player1Move: game.player1Move, player2Move: null, player1Score: game.player1Score, player2Score: game.player2Score, winner: 'player1', roundNum: game.roundNum });
+      game.player1Move = null; game.player2Move = null; game.roundNum++;
+      setTimeout(() => { io.to(roomId).emit('start_round', { roundNum: game.roundNum }); startRoundTimer(roomId); }, 3500);
+      return;
+    }
+
+    // One player AFK — use DB transaction to process SOL like a normal round
+    const client = await db.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const roomRes = await client.query('SELECT bet_sol, fee_rate, player1_wallet FROM rooms WHERE id = $1', [roomId]);
+      const { bet_sol, fee_rate, player1_wallet: creatorWallet } = roomRes.rows[0];
+      const betSol = parseFloat(bet_sol);
+      const feeRate = parseFloat(fee_rate);
+      const feeSol = betSol * 2 * feeRate;
+      const winnerReceives = betSol * 2 - feeSol;
+
+      let afkWallet, winnerWallet, resolvedWinner;
+
+      if (noMove1) {
+        game.player2Score++;
+        resolvedWinner = 'player2';
+        winnerWallet = game.player2Wallet;
+        afkWallet = game.player1Wallet;
+      } else {
+        game.player1Score++;
+        resolvedWinner = 'player1';
+        winnerWallet = game.player1Wallet;
+        afkWallet = game.player2Wallet;
+      }
+
+      // Credit winner, debit AFK player
+      await client.query('UPDATE players SET rating = rating + 25, wins = wins + 1, sol_balance = sol_balance + $1 WHERE wallet_address = $2', [winnerReceives - betSol, winnerWallet]);
+      await client.query('UPDATE players SET rating = GREATEST(100, rating - 15), losses = losses + 1, sol_balance = GREATEST(0, sol_balance - $1) WHERE wallet_address = $2', [betSol, afkWallet]);
+
+      // Fee distribution
+      const config = await getConfig();
+      const isCustomRoom = roomId.startsWith('room_');
+      let giveawayContribution = 0;
+      let platformFee = 0;
+      let hostFeeSol = 0;
+
+      if (isCustomRoom) {
+        const platformShareSol = betSol * 2 * 0.015;
+        giveawayContribution = platformShareSol * parseFloat(config.giveaway_pool_rate || 0.30);
+        platformFee = platformShareSol - giveawayContribution;
+        hostFeeSol = Math.max(0, feeSol - platformShareSol);
+        if (hostFeeSol > 0 && creatorWallet) {
+          await client.query('UPDATE players SET sol_balance = sol_balance + $1 WHERE wallet_address = $2', [hostFeeSol, creatorWallet]);
+        }
+      } else {
+        const poolRate = parseFloat(config.giveaway_pool_rate || 0.30);
+        giveawayContribution = feeSol * poolRate;
+        platformFee = feeSol - giveawayContribution;
+      }
+
+      await client.query("UPDATE platform_config SET value = CAST(CAST(value AS DECIMAL) + $1 AS TEXT), updated_at = NOW() WHERE key = 'platform_fees_collected_sol'", [platformFee]);
+      await client.query("UPDATE platform_config SET value = CAST(CAST(value AS DECIMAL) + $1 AS TEXT), updated_at = NOW() WHERE key = 'giveaway_pool_sol'", [giveawayContribution]);
+
+      await client.query(
+        `INSERT INTO matches (room_id, player1_wallet, player2_wallet, winner_wallet, player1_move, player2_move, bet_sol, fee_sol)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [roomId, game.player1Wallet, game.player2Wallet, winnerWallet, game.player1Move || null, game.player2Move || null, betSol, feeSol]
+      );
+
+      await client.query('COMMIT');
+
+      io.to(roomId).emit('round_resolved', {
+        player1Move: game.player1Move, player2Move: game.player2Move,
+        player1Score: game.player1Score, player2Score: game.player2Score,
+        winner: resolvedWinner, roundNum: game.roundNum
+      });
+
+      const [p1Profile, p2Profile] = await Promise.all([
+        db.query('SELECT rating, sol_balance, wins, losses, draws FROM players WHERE wallet_address = $1', [game.player1Wallet]),
+        db.query('SELECT rating, sol_balance, wins, losses, draws FROM players WHERE wallet_address = $1', [game.player2Wallet])
+      ]);
+
+      io.to(roomId).emit('profile_sync_update', {
+        player1: { wallet: game.player1Wallet, rating: p1Profile.rows[0].rating, solBalance: parseFloat(p1Profile.rows[0].sol_balance), wins: p1Profile.rows[0].wins, losses: p1Profile.rows[0].losses, draws: p1Profile.rows[0].draws },
+        player2: { wallet: game.player2Wallet, rating: p2Profile.rows[0].rating, solBalance: parseFloat(p2Profile.rows[0].sol_balance), wins: p2Profile.rows[0].wins, losses: p2Profile.rows[0].losses, draws: p2Profile.rows[0].draws }
+      });
+
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('AFK round resolution error, rolled back:', err.message);
+    } finally {
+      client.release();
     }
 
     game.player1Move = null; game.player2Move = null; game.roundNum++;
@@ -635,12 +893,25 @@ io.on('connection', (socket) => {
 
   socket.on('send_chat', async ({ roomId, text }) => {
     if (!userWallet) return;
+    // Sanitize: trim and cap length
+    const cleanText = String(text || '').trim().slice(0, 300);
+    if (!cleanText) return;
     try {
       const playerRes = await db.query('SELECT username FROM players WHERE wallet_address = $1', [userWallet]);
       if (!playerRes.rows[0]) return;
       const username = playerRes.rows[0].username;
-      await db.query('INSERT INTO messages (sender_username, sender_wallet, room_id, text) VALUES ($1, $2, $3, $4)', [username, userWallet, roomId || null, text]);
-      const msgData = { id: Date.now(), sender: username, senderWallet: userWallet, text, time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }), likes: 0 };
+      const msgRes = await db.query(
+        'INSERT INTO messages (sender_username, sender_wallet, room_id, text) VALUES ($1, $2, $3, $4) RETURNING id',
+        [username, userWallet, roomId || null, cleanText]
+      );
+      const msgData = {
+        id: msgRes.rows[0]?.id || Date.now(),
+        sender: username,
+        senderWallet: userWallet,
+        text: cleanText,
+        time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+        likes: 0
+      };
       if (roomId) io.to(roomId).emit('chat_broadcast', { ...msgData, tab: 'opponent' });
       else io.to('lobby').emit('chat_broadcast', { ...msgData, tab: 'general' });
     } catch (err) {
@@ -655,6 +926,8 @@ io.on('connection', (socket) => {
       const roomRes = await db.query('SELECT * FROM rooms WHERE id = $1', [currentRoomId]);
       if (roomRes.rows[0]) {
         const room = roomRes.rows[0];
+        const game = activeGames.get(currentRoomId);
+        if (game && game.readyTimeoutTimer) clearTimeout(game.readyTimeoutTimer);
         if (room.player1_wallet === userWallet) {
           if (room.player2_wallet) await db.query("UPDATE rooms SET player1_wallet = player2_wallet, player2_wallet = NULL, status = 'OPEN' WHERE id = $1", [currentRoomId]);
           else { await db.query('DELETE FROM rooms WHERE id = $1', [currentRoomId]); activeGames.delete(currentRoomId); }
@@ -673,6 +946,7 @@ io.on('connection', (socket) => {
     if (currentRoomId) {
       const game = activeGames.get(currentRoomId);
       if (game && game.timer) clearInterval(game.timer);
+      if (game && game.readyTimeoutTimer) clearTimeout(game.readyTimeoutTimer);
       try {
         const roomRes = await db.query('SELECT * FROM rooms WHERE id = $1', [currentRoomId]);
         if (roomRes.rows[0]) {
@@ -690,6 +964,55 @@ io.on('connection', (socket) => {
     }
     broadcastLobbyState();
   });
+});
+
+// ─────────────────────────────────────────────
+// Auth Endpoints (Nonce/Signature)
+// ─────────────────────────────────────────────
+
+// Step 1: Get a nonce to sign
+app.get('/api/auth/nonce/:wallet', authLimiter, (req, res) => {
+  const { wallet } = req.params;
+  if (!wallet) return res.status(400).json({ error: 'Wallet required' });
+  const nonce = generateNonce();
+  authNonces.set(wallet, { nonce, expiresAt: Date.now() + 5 * 60 * 1000 }); // 5 min TTL
+  const message = buildAuthMessage(nonce);
+  res.json({ nonce, message });
+});
+
+// Step 2: Verify signature & receive session JWT
+app.post('/api/auth/verify', authLimiter, async (req, res) => {
+  const { wallet, signature } = req.body;
+  if (!wallet || !signature) return res.status(400).json({ error: 'wallet and signature are required' });
+
+  const stored = authNonces.get(wallet);
+  if (!stored || Date.now() > stored.expiresAt) {
+    return res.status(401).json({ error: 'Nonce expired or not found. Please request a new one.' });
+  }
+
+  const message = buildAuthMessage(stored.nonce);
+
+  try {
+    const messageBytes = Buffer.from(message, 'utf8');
+    const signatureBytes = Buffer.from(signature, 'base64');
+    const pubkeyBytes = bs58.decode(wallet);
+
+    const valid = nacl.sign.detached.verify(
+      new Uint8Array(messageBytes),
+      new Uint8Array(signatureBytes),
+      new Uint8Array(pubkeyBytes)
+    );
+
+    if (!valid) return res.status(401).json({ error: 'Signature verification failed. Please reconnect your wallet.' });
+
+    authNonces.delete(wallet); // Consume nonce — one-time use
+
+    const token = jwt.sign({ wallet }, JWT_SECRET, { expiresIn: '24h' });
+    res.json({ token });
+  } catch (err) {
+    console.error('Signature verify error:', err.message);
+    res.status(401).json({ error: 'Signature verification failed: ' + err.message });
+  }
 });
 
 // ─────────────────────────────────────────────
@@ -736,10 +1059,40 @@ app.get('/api/profile/:wallet', async (req, res) => {
   }
 });
 
-app.post('/api/profile/username', async (req, res) => {
+// Giveaway winners history (public)
+app.get('/api/giveaway-history', async (_req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT gw.username, gw.sol_won, to_char(gw.won_at, 'DD Mon YYYY') as date, g.title
+      FROM giveaway_winners gw
+      JOIN giveaways g ON gw.giveaway_id = g.id
+      ORDER BY gw.won_at DESC LIMIT 20
+    `);
+    res.json(result.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Deep link: /room/:id redirects to frontend with query param
+app.get('/room/:id', (req, res) => {
+  res.redirect(`/?room=${req.params.id}`);
+});
+
+// ─────────────────────────────────────────────
+// Protected Player API (walletAuth required)
+// ─────────────────────────────────────────────
+
+app.post('/api/profile/username', walletAuth, async (req, res) => {
   const { wallet, username } = req.body;
+  // Ensure the authenticated wallet matches the request
+  if (req.walletAddress !== wallet) {
+    return res.status(403).json({ error: 'You can only change your own username.' });
+  }
   if (!wallet || !username || username.length < 3 || username.length > 20) {
     return res.status(400).json({ error: 'Username must be 3–20 characters' });
+  }
+  // Only allow alphanumeric and underscores
+  if (!/^[a-zA-Z0-9_]+$/.test(username)) {
+    return res.status(400).json({ error: 'Username can only contain letters, numbers, and underscores.' });
   }
   try {
     await db.query('UPDATE players SET username = $1 WHERE wallet_address = $2', [username.trim(), wallet]);
@@ -750,8 +1103,10 @@ app.post('/api/profile/username', async (req, res) => {
   }
 });
 
-// Get custodial wallet info for a player
-app.get('/api/wallet/info/:wallet', async (req, res) => {
+app.get('/api/wallet/info/:wallet', walletAuth, async (req, res) => {
+  if (req.walletAddress !== req.params.wallet) {
+    return res.status(403).json({ error: 'Access denied.' });
+  }
   try {
     const result = await db.query(
       'SELECT custodial_wallet_address, sol_balance FROM players WHERE wallet_address = $1',
@@ -767,27 +1122,37 @@ app.get('/api/wallet/info/:wallet', async (req, res) => {
   }
 });
 
-// Fetch live on-chain SOL balance and sync to DB
-app.post('/api/wallet/sync-balance', async (req, res) => {
+// Fetch live on-chain SOL balance and sync to DB using custodial_synced_sol tracking
+app.post('/api/wallet/sync-balance', walletAuth, async (req, res) => {
   const { wallet } = req.body;
-  if (!wallet) return res.status(400).json({ error: 'wallet required' });
+  if (!wallet || req.walletAddress !== wallet) {
+    return res.status(403).json({ error: 'Access denied.' });
+  }
   try {
     const config = await getConfig();
     const playerRes = await db.query(
-      'SELECT custodial_wallet_address FROM players WHERE wallet_address = $1', [wallet]
+      'SELECT custodial_wallet_address, custodial_synced_sol, sol_balance FROM players WHERE wallet_address = $1', [wallet]
     );
     if (!playerRes.rows[0] || !playerRes.rows[0].custodial_wallet_address) {
       return res.status(404).json({ error: 'Custodial wallet not found' });
     }
-    const custodialAddress = playerRes.rows[0].custodial_wallet_address;
+    const p = playerRes.rows[0];
+    const custodialAddress = p.custodial_wallet_address;
     const onChainBalance = await getSolBalance(custodialAddress, config.sol_rpc_url);
-    
-    // Only increase balance from on-chain (don't decrease — game deductions are internal)
-    await db.query(
-      'UPDATE players SET sol_balance = GREATEST(sol_balance, $1) WHERE wallet_address = $2',
-      [onChainBalance, wallet]
-    );
-    
+    const lastSynced = parseFloat(p.custodial_synced_sol || 0);
+    const currentDbBalance = parseFloat(p.sol_balance || 0);
+
+    // Only credit the NEW deposit amount (difference above last known on-chain balance)
+    // This prevents re-crediting SOL that was already accounted for via game winnings
+    if (onChainBalance > lastSynced) {
+      const newDeposit = onChainBalance - lastSynced;
+      await db.query(
+        'UPDATE players SET sol_balance = sol_balance + $1, custodial_synced_sol = $2 WHERE wallet_address = $3',
+        [newDeposit, onChainBalance, wallet]
+      );
+    }
+    // If on-chain < lastSynced: withdrawal happened or loss — do nothing to game balance
+
     const updated = await db.query('SELECT sol_balance FROM players WHERE wallet_address = $1', [wallet]);
     res.json({ solBalance: parseFloat(updated.rows[0].sol_balance), custodialAddress });
   } catch (err) {
@@ -795,25 +1160,30 @@ app.post('/api/wallet/sync-balance', async (req, res) => {
   }
 });
 
-// Withdraw — send real SOL from custodial wallet to player's connected wallet
-app.post('/api/withdraw', async (req, res) => {
+// Withdraw SOL — protected and rate limited
+app.post('/api/withdraw', walletAuth, withdrawLimiter, async (req, res) => {
   const { wallet, solAmount } = req.body;
+  if (req.walletAddress !== wallet) {
+    return res.status(403).json({ error: 'You can only withdraw your own funds.' });
+  }
   const minWithdraw = 0.001;
-  const withdrawFee = 0.01; // 1% fee
   if (!wallet || !solAmount || parseFloat(solAmount) < minWithdraw) {
     return res.status(400).json({ error: `Minimum withdrawal is ${minWithdraw} SOL` });
   }
   try {
     const config = await getConfig();
+    // Read withdraw fee from config (with fallback)
+    const withdrawFeeRate = parseFloat(config.withdraw_fee_rate || 0.01);
+
     const playerRes = await db.query(
-      'SELECT sol_balance, custodial_wallet_address, custodial_wallet_secret FROM players WHERE wallet_address = $1',
+      'SELECT sol_balance, custodial_wallet_address, custodial_wallet_secret, custodial_synced_sol FROM players WHERE wallet_address = $1',
       [wallet]
     );
     if (!playerRes.rows[0]) return res.status(404).json({ error: 'Player not found' });
 
     const p = playerRes.rows[0];
     const amount = parseFloat(solAmount);
-    const fee = amount * withdrawFee;
+    const fee = amount * withdrawFeeRate;
     const netAmount = amount - fee;
     const balance = parseFloat(p.sol_balance || 0);
 
@@ -821,24 +1191,24 @@ app.post('/api/withdraw', async (req, res) => {
       return res.status(400).json({ error: `Insufficient balance. You have ${balance.toFixed(4)} SOL.` });
     }
 
-    // Deduct from DB immediately to prevent double-spend
-    await db.query('UPDATE players SET sol_balance = sol_balance - $1 WHERE wallet_address = $2', [amount, wallet]);
+    // Deduct from DB immediately (prevent double-spend) + update custodial_synced_sol
+    await db.query(
+      'UPDATE players SET sol_balance = sol_balance - $1, custodial_synced_sol = GREATEST(0, custodial_synced_sol - $1) WHERE wallet_address = $2',
+      [amount, wallet]
+    );
 
-    // Log the transaction as PENDING
     const txRow = await db.query(
       `INSERT INTO transactions (wallet_address, type, sol_amount, fee_sol, status, notes)
        VALUES ($1, 'WITHDRAW', $2, $3, 'PENDING', $4) RETURNING id`,
       [wallet, amount, fee, `Withdraw ${amount} SOL (fee ${fee.toFixed(6)} SOL) → ${wallet}`]
     );
 
-    // Send real on-chain transaction
     try {
       const signature = await sendSolOnChain(p.custodial_wallet_secret, wallet, netAmount, config.sol_rpc_url);
       await db.query(
         "UPDATE transactions SET status = 'COMPLETED', tx_signature = $1, completed_at = NOW() WHERE id = $2",
         [signature, txRow.rows[0].id]
       );
-      // Add fee to platform collected fees
       await db.query(
         "UPDATE platform_config SET value = CAST(CAST(value AS DECIMAL) + $1 AS TEXT), updated_at = NOW() WHERE key = 'platform_fees_collected_sol'",
         [fee]
@@ -846,7 +1216,10 @@ app.post('/api/withdraw', async (req, res) => {
       res.json({ success: true, solAmount: netAmount.toFixed(6), fee: fee.toFixed(6), signature });
     } catch (sendErr) {
       // Rollback balance if send fails
-      await db.query('UPDATE players SET sol_balance = sol_balance + $1 WHERE wallet_address = $2', [amount, wallet]);
+      await db.query(
+        'UPDATE players SET sol_balance = sol_balance + $1, custodial_synced_sol = custodial_synced_sol + $1 WHERE wallet_address = $2',
+        [amount, wallet]
+      );
       await db.query("UPDATE transactions SET status = 'FAILED', notes = $1 WHERE id = $2", [sendErr.message, txRow.rows[0].id]);
       res.status(500).json({ error: 'On-chain transfer failed: ' + sendErr.message });
     }
@@ -855,17 +1228,171 @@ app.post('/api/withdraw', async (req, res) => {
   }
 });
 
-// Giveaway winners history (public)
-app.get('/api/giveaway-history', async (_req, res) => {
+// Link Twitter (X) Account — with uniqueness check
+app.post('/api/wallet/link-x', walletAuth, async (req, res) => {
+  const { wallet, xUsername } = req.body;
+  if (req.walletAddress !== wallet) {
+    return res.status(403).json({ error: 'Access denied.' });
+  }
+  if (!wallet || !xUsername) {
+    return res.status(400).json({ error: 'Missing wallet or X username' });
+  }
+  const cleanHandle = xUsername.trim().replace(/^@/, ''); // strip @ if included
+  if (!/^[a-zA-Z0-9_]{1,50}$/.test(cleanHandle)) {
+    return res.status(400).json({ error: 'Invalid X username format.' });
+  }
   try {
-    const result = await db.query(`
-      SELECT gw.username, gw.sol_won, to_char(gw.won_at, 'DD Mon YYYY') as date, g.title
-      FROM giveaway_winners gw
-      JOIN giveaways g ON gw.giveaway_id = g.id
-      ORDER BY gw.won_at DESC LIMIT 20
-    `);
+    // Check if this X username is already linked to another wallet
+    const existing = await db.query(
+      'SELECT wallet_address FROM players WHERE x_username = $1 AND wallet_address != $2',
+      [cleanHandle, wallet]
+    );
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ error: 'This X username is already linked to another wallet.' });
+    }
+    await db.query('UPDATE players SET x_username = $1 WHERE wallet_address = $2', [cleanHandle, wallet]);
+    res.json({ success: true, xUsername: cleanHandle });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Verify Twitter share for Giveaway Entry — auth + active check + time check
+app.post('/api/giveaways/:id/verify-share', walletAuth, verifyShareLimiter, async (req, res) => {
+  const { wallet, tweetUrl } = req.body;
+  if (req.walletAddress !== wallet) {
+    return res.status(403).json({ error: 'Access denied.' });
+  }
+  const giveawayId = req.params.id;
+  if (!wallet || !tweetUrl) {
+    return res.status(400).json({ error: 'Missing wallet or Tweet URL' });
+  }
+  try {
+    // Check giveaway exists and is still ACTIVE
+    const gwRes = await db.query('SELECT * FROM giveaways WHERE id = $1', [giveawayId]);
+    if (!gwRes.rows[0]) return res.status(404).json({ error: 'Giveaway not found.' });
+    const gw = gwRes.rows[0];
+    if (gw.status !== 'ACTIVE') {
+      return res.status(400).json({ error: 'This giveaway is no longer active.' });
+    }
+
+    const playerRes = await db.query('SELECT x_username FROM players WHERE wallet_address = $1', [wallet]);
+    const xUsername = playerRes.rows[0]?.x_username;
+    if (!xUsername) {
+      return res.status(400).json({ error: 'Please link your Twitter (X) account first' });
+    }
+
+    // Fetch Tweet from Twitter oEmbed API
+    const oembedUrl = `https://publish.twitter.com/oembed?url=${encodeURIComponent(tweetUrl)}`;
+    const oembedRes = await fetch(oembedUrl);
+    if (!oembedRes.ok) {
+      return res.status(400).json({ error: 'Failed to fetch tweet details. Make sure the URL is correct and public.' });
+    }
+    const oembedData = await oembedRes.json();
+    const tweetHtml = oembedData.html || '';
+
+    // Check tweet mentions the platform
+    const hasPlatform = tweetHtml.toLowerCase().includes('rps') || tweetHtml.toLowerCase().includes('rpsroom');
+    const hasUser = tweetHtml.toLowerCase().includes(`twitter.com/${xUsername.toLowerCase()}`) ||
+                    tweetHtml.toLowerCase().includes(`@${xUsername.toLowerCase()}`);
+
+    if (!hasPlatform) {
+      return res.status(400).json({ error: 'Tweet does not mention our platform (rpsroom).' });
+    }
+    if (!hasUser) {
+      return res.status(400).json({ error: 'Tweet handle does not match your linked X username (@' + xUsername + ').' });
+    }
+
+    // Check tweet is not older than the giveaway start
+    const tweetDateMatch = tweetHtml.match(/datetime="([^"]+)"/);
+    if (tweetDateMatch) {
+      const tweetDate = new Date(tweetDateMatch[1]);
+      const giveawayDate = new Date(gw.created_at);
+      if (tweetDate < giveawayDate) {
+        return res.status(400).json({ error: 'Your tweet was posted before this giveaway started. Please share a new tweet.' });
+      }
+    }
+
+    await db.query(
+      `INSERT INTO giveaway_entries (giveaway_id, wallet_address, tweet_url)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (giveaway_id, wallet_address) DO UPDATE SET tweet_url = EXCLUDED.tweet_url`,
+      [giveawayId, wallet, tweetUrl]
+    );
+
+    res.json({ success: true, message: 'Giveaway entry verified successfully!' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Like a message (persisted to DB, one like per wallet per message)
+app.post('/api/messages/:id/like', walletAuth, async (req, res) => {
+  const messageId = parseInt(req.params.id);
+  if (!messageId) return res.status(400).json({ error: 'Invalid message ID' });
+  try {
+    // Insert into message_likes (unique constraint prevents duplicates)
+    await db.query(
+      'INSERT INTO message_likes (message_id, wallet_address) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      [messageId, req.walletAddress]
+    );
+    // Update likes count on messages table
+    await db.query('UPDATE messages SET likes = (SELECT COUNT(*) FROM message_likes WHERE message_id = $1) WHERE id = $1', [messageId]);
+    const updated = await db.query('SELECT likes FROM messages WHERE id = $1', [messageId]);
+    res.json({ success: true, likes: updated.rows[0]?.likes || 0 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Report a player
+app.post('/api/players/:wallet/report', walletAuth, async (req, res) => {
+  const { reason } = req.body;
+  const reportedWallet = req.params.wallet;
+  if (req.walletAddress === reportedWallet) {
+    return res.status(400).json({ error: 'You cannot report yourself.' });
+  }
+  try {
+    await db.query(
+      'INSERT INTO player_reports (reporter_wallet, reported_wallet, reason) VALUES ($1, $2, $3)',
+      [req.walletAddress, reportedWallet, (reason || 'No reason provided').slice(0, 500)]
+    );
+    res.json({ success: true, message: 'Report submitted. Our team will review it.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Block a player
+app.post('/api/players/:wallet/block', walletAuth, async (req, res) => {
+  const blockedWallet = req.params.wallet;
+  if (req.walletAddress === blockedWallet) {
+    return res.status(400).json({ error: 'You cannot block yourself.' });
+  }
+  try {
+    await db.query(
+      'INSERT INTO block_list (wallet_address, blocked_wallet) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      [req.walletAddress, blockedWallet]
+    );
+    res.json({ success: true, message: 'Player blocked.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get blocked players list
+app.get('/api/players/blocked', walletAuth, async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT b.blocked_wallet, p.username FROM block_list b
+       LEFT JOIN players p ON b.blocked_wallet = p.wallet_address
+       WHERE b.wallet_address = $1`,
+      [req.walletAddress]
+    );
     res.json(result.rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─────────────────────────────────────────────
@@ -878,7 +1405,7 @@ async function seedAdmin() {
     if (existing.rows.length === 0) {
       const hash = await bcrypt.hash('RpsAdmin2024!', 12);
       await db.query('INSERT INTO admins (username, password_hash) VALUES ($1, $2)', ['admin', hash]);
-      console.log('Admin account seeded: admin / RpsAdmin2024!');
+      console.log('Admin account seeded. IMPORTANT: Change the default password immediately!');
     }
   } catch (err) {
     console.error('Admin seeding failed:', err.message);
@@ -889,7 +1416,7 @@ if (require.main === module) {
   setTimeout(seedAdmin, 2000);
 }
 
-app.post('/api/admin/login', async (req, res) => {
+app.post('/api/admin/login', adminLoginLimiter, async (req, res) => {
   const { username, password } = req.body;
   try {
     const result = await db.query('SELECT * FROM admins WHERE username = $1', [username]);
@@ -915,6 +1442,7 @@ app.get('/api/admin/stats', adminAuth, async (_req, res) => {
           (SELECT COALESCE(SUM(fee_sol),0) FROM matches) as total_fees_sol,
           (SELECT COUNT(*) FROM transactions WHERE type = 'WITHDRAW' AND status = 'PENDING') as pending_withdrawals,
           (SELECT COUNT(*) FROM giveaways WHERE status = 'ACTIVE') as active_giveaways,
+          (SELECT COUNT(*) FROM player_reports WHERE created_at > NOW() - INTERVAL '7 days') as recent_reports,
           (SELECT COALESCE(value,'0') FROM platform_config WHERE key = 'platform_fees_collected_sol') as fees_collected_sol
       `),
       db.query('SELECT key, value FROM platform_config')
@@ -927,8 +1455,8 @@ app.get('/api/admin/stats', adminAuth, async (_req, res) => {
 
 app.get('/api/admin/players', adminAuth, async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit) || 50;
-    const offset = parseInt(req.query.offset) || 0;
+    const limit = Math.min(parseInt(req.query.limit) || 50, 500);
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0);
     const result = await db.query(
       `SELECT wallet_address, username, rating, wins, losses, draws, sol_balance, custodial_wallet_address, to_char(last_active, 'DD Mon YYYY HH24:MI') as last_active FROM players ORDER BY sol_balance DESC LIMIT $1 OFFSET $2`,
       [limit, offset]
@@ -949,22 +1477,26 @@ app.get('/api/admin/transactions', adminAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Manual SOL credit (admin override — for testing or airdrop)
+// Manual SOL credit — validates amount is positive
 app.post('/api/admin/credit-sol', adminAuth, async (req, res) => {
   const { wallet, solAmount, notes } = req.body;
+  const amount = parseFloat(solAmount);
+  if (!wallet || !amount || amount <= 0 || amount > 1000) {
+    return res.status(400).json({ error: 'solAmount must be a positive number (max 1000 SOL per credit).' });
+  }
   try {
-    await db.query('UPDATE players SET sol_balance = sol_balance + $1 WHERE wallet_address = $2', [solAmount, wallet]);
+    await db.query('UPDATE players SET sol_balance = sol_balance + $1 WHERE wallet_address = $2', [amount, wallet]);
     await db.query(
       `INSERT INTO transactions (wallet_address, type, sol_amount, status, notes)
        VALUES ($1, 'CREDIT', $2, 'COMPLETED', $3)`,
-      [wallet, solAmount, notes || `Admin credit: ${solAmount} SOL`]
+      [wallet, amount, notes || `Admin credit: ${amount} SOL`]
     );
     broadcastLobbyState();
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Sweep all collected platform fees to the business wallet
+// Fee sweep — resets virtual counter (ledger-only; real on-chain requires manual transfer)
 app.post('/api/admin/sweep-fees', adminAuth, async (req, res) => {
   try {
     const config = await getConfig();
@@ -972,17 +1504,19 @@ app.post('/api/admin/sweep-fees', adminAuth, async (req, res) => {
     if (collectedSol < 0.001) {
       return res.status(400).json({ error: `Not enough fees to sweep. Current: ${collectedSol} SOL` });
     }
-    // For the fee sweep we need a platform custodial wallet — use the first player with the most fees
-    // In practice, fees are virtual (game ledger). Admin sweeps them by manually moving from the 
-    // custodial wallets. This endpoint just resets the counter and records the intent.
     const platformWallet = config.platform_wallet_address || '7o7YrgFHTbxWGezYeue36Lfv6vzXzEsZQVePY4ic66s6';
     await db.query("UPDATE platform_config SET value = '0', updated_at = NOW() WHERE key = 'platform_fees_collected_sol'");
     await db.query(
       `INSERT INTO transactions (wallet_address, type, sol_amount, status, notes)
        VALUES ($1, 'FEE_SWEEP', $2, 'COMPLETED', $3)`,
-      [platformWallet, collectedSol, `Fee sweep: ${collectedSol} SOL → ${platformWallet}`]
+      [platformWallet, collectedSol, `Fee sweep (ledger reset): ${collectedSol} SOL. NOTE: Actual on-chain transfer must be done manually from custodial wallets.`]
     );
-    res.json({ success: true, sweptSol: collectedSol, to: platformWallet });
+    res.json({
+      success: true,
+      sweptSol: collectedSol,
+      to: platformWallet,
+      warning: 'This resets the platform fee counter only. The SOL is held across custodial player wallets and must be transferred manually on-chain.'
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -993,16 +1527,41 @@ app.get('/api/admin/rooms', adminAuth, async (_req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Fixed: use parameterized LIMIT instead of string interpolation
 app.get('/api/admin/matches', adminAuth, async (req, res) => {
   try {
-    const result = await db.query(`SELECT m.id, m.room_id, m.player1_move, m.player2_move, m.bet_sol, m.fee_sol, to_char(m.played_at,'DD Mon YYYY HH24:MI') as played_at, p1.username as player1, p2.username as player2, pw.username as winner FROM matches m LEFT JOIN players p1 ON m.player1_wallet = p1.wallet_address LEFT JOIN players p2 ON m.player2_wallet = p2.wallet_address LEFT JOIN players pw ON m.winner_wallet = pw.wallet_address ORDER BY m.played_at DESC LIMIT ${parseInt(req.query.limit) || 100}`);
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+    const result = await db.query(
+      `SELECT m.id, m.room_id, m.player1_move, m.player2_move, m.bet_sol, m.fee_sol, to_char(m.played_at,'DD Mon YYYY HH24:MI') as played_at, p1.username as player1, p2.username as player2, pw.username as winner FROM matches m LEFT JOIN players p1 ON m.player1_wallet = p1.wallet_address LEFT JOIN players p2 ON m.player2_wallet = p2.wallet_address LEFT JOIN players pw ON m.winner_wallet = pw.wallet_address ORDER BY m.played_at DESC LIMIT $1`,
+      [limit]
+    );
     res.json(result.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Fixed: use parameterized LIMIT
 app.get('/api/admin/messages', adminAuth, async (req, res) => {
   try {
-    const result = await db.query(`SELECT sender_username, sender_wallet, room_id, text, likes, to_char(created_at,'DD Mon YYYY HH24:MI') as created_at FROM messages ORDER BY created_at DESC LIMIT ${parseInt(req.query.limit) || 50}`);
+    const limit = Math.min(parseInt(req.query.limit) || 50, 500);
+    const result = await db.query(
+      `SELECT sender_username, sender_wallet, room_id, text, likes, to_char(created_at,'DD Mon YYYY HH24:MI') as created_at FROM messages ORDER BY created_at DESC LIMIT $1`,
+      [limit]
+    );
+    res.json(result.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// View reports (admin only)
+app.get('/api/admin/reports', adminAuth, async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT pr.id, pr.reason, to_char(pr.created_at, 'DD Mon YYYY HH24:MI') as created_at,
+             p1.username as reporter, p2.username as reported
+      FROM player_reports pr
+      LEFT JOIN players p1 ON pr.reporter_wallet = p1.wallet_address
+      LEFT JOIN players p2 ON pr.reported_wallet = p2.wallet_address
+      ORDER BY pr.created_at DESC LIMIT 200
+    `);
     res.json(result.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1016,6 +1575,10 @@ app.get('/api/admin/room-tiers', adminAuth, async (_req, res) => {
 
 app.put('/api/admin/room-tiers/:id', adminAuth, async (req, res) => {
   const { title, bet_sol, fee_rate, is_ranked, display_order, is_active } = req.body;
+  // Validate fee rate
+  if (parseFloat(fee_rate) < 0 || parseFloat(fee_rate) > 1) {
+    return res.status(400).json({ error: 'fee_rate must be between 0 and 1 (0% to 100%).' });
+  }
   try {
     const result = await db.query(
       `UPDATE room_tiers SET title=$1, bet_sol=$2, fee_rate=$3, is_ranked=$4, display_order=$5, is_active=$6 WHERE id=$7 RETURNING *`,
@@ -1026,7 +1589,7 @@ app.put('/api/admin/room-tiers/:id', adminAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Platform Config
+// Platform Config — with validation
 app.get('/api/admin/config', adminAuth, async (_req, res) => {
   try {
     res.json((await db.query('SELECT * FROM platform_config ORDER BY key')).rows);
@@ -1035,8 +1598,19 @@ app.get('/api/admin/config', adminAuth, async (_req, res) => {
 
 app.put('/api/admin/config/:key', adminAuth, async (req, res) => {
   const { value } = req.body;
+  const { key } = req.params;
+
+  // Validate fee rate values
+  const feeKeys = ['game_fee_rate', 'withdraw_fee_rate', 'giveaway_pool_rate'];
+  if (feeKeys.includes(key)) {
+    const num = parseFloat(value);
+    if (isNaN(num) || num < 0 || num > 1) {
+      return res.status(400).json({ error: `${key} must be a number between 0 and 1.` });
+    }
+  }
+
   try {
-    await db.query('UPDATE platform_config SET value=$1, updated_at=NOW() WHERE key=$2', [value, req.params.key]);
+    await db.query('UPDATE platform_config SET value=$1, updated_at=NOW() WHERE key=$2', [value, key]);
     broadcastLobbyState();
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1051,8 +1625,11 @@ app.get('/api/admin/giveaways', adminAuth, async (_req, res) => {
 
 app.post('/api/admin/giveaways', adminAuth, async (req, res) => {
   const { title, description, prize_sol, winner_count, end_date } = req.body;
+  if (!title || !title.trim()) return res.status(400).json({ error: 'Title is required.' });
+  const prize = parseFloat(prize_sol || 0);
+  if (prize < 0) return res.status(400).json({ error: 'Prize cannot be negative.' });
   try {
-    const result = await db.query(`INSERT INTO giveaways (title, description, prize_sol, winner_count, end_date, status) VALUES ($1, $2, $3, $4, $5, 'ACTIVE') RETURNING *`, [title, description || '', prize_sol || 0, winner_count || 1, end_date || null]);
+    const result = await db.query(`INSERT INTO giveaways (title, description, prize_sol, winner_count, end_date, status) VALUES ($1, $2, $3, $4, $5, 'ACTIVE') RETURNING *`, [title, description || '', prize, winner_count || 1, end_date || null]);
     broadcastLobbyState();
     res.json(result.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -1075,12 +1652,22 @@ app.delete('/api/admin/giveaways/:id', adminAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Distribute giveaway
+// Distribute giveaway — with pool balance check
 app.post('/api/admin/giveaways/:id/distribute', adminAuth, async (req, res) => {
   try {
     const gwRes = await db.query('SELECT * FROM giveaways WHERE id = $1', [req.params.id]);
     if (!gwRes.rows[0]) return res.status(404).json({ error: 'Giveaway not found' });
     const gw = gwRes.rows[0];
+
+    // Check pool has enough SOL to cover the prize
+    const config = await getConfig();
+    const poolSol = parseFloat(config.giveaway_pool_sol || 0);
+    const prizeSol = parseFloat(gw.prize_sol);
+    if (poolSol < prizeSol) {
+      return res.status(400).json({
+        error: `Insufficient giveaway pool. Pool has ${poolSol.toFixed(4)} SOL, prize requires ${prizeSol.toFixed(4)} SOL.`
+      });
+    }
 
     const eligibleRes = await db.query(
       `SELECT DISTINCT p.wallet_address, p.username FROM players p
@@ -1090,7 +1677,11 @@ app.post('/api/admin/giveaways/:id/distribute', adminAuth, async (req, res) => {
     );
 
     const winners = eligibleRes.rows;
-    const solPerWinner = parseFloat(gw.prize_sol) / Math.max(winners.length, 1);
+    if (winners.length === 0) {
+      return res.status(400).json({ error: 'No eligible entries for this giveaway.' });
+    }
+
+    const solPerWinner = prizeSol / winners.length;
 
     for (const winner of winners) {
       await db.query('UPDATE players SET sol_balance = sol_balance + $1 WHERE wallet_address = $2', [solPerWinner, winner.wallet_address]);
@@ -1101,10 +1692,9 @@ app.post('/api/admin/giveaways/:id/distribute', adminAuth, async (req, res) => {
     }
 
     await db.query("UPDATE giveaways SET status = 'COMPLETED' WHERE id = $1", [gw.id]);
-    // Deduct from giveaway pool
     await db.query(
       "UPDATE platform_config SET value = CAST(GREATEST(0, CAST(value AS DECIMAL) - $1) AS TEXT), updated_at = NOW() WHERE key = 'giveaway_pool_sol'",
-      [parseFloat(gw.prize_sol)]
+      [prizeSol]
     );
     broadcastLobbyState();
     io.to('lobby').emit('giveaway_winners', { title: gw.title, winners: winners.map(w => ({ username: w.username, solWon: solPerWinner })) });
@@ -1112,69 +1702,8 @@ app.post('/api/admin/giveaways/:id/distribute', adminAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Link Twitter (X) Account
-app.post('/api/wallet/link-x', async (req, res) => {
-  const { wallet, xUsername } = req.body;
-  if (!wallet || !xUsername) {
-    return res.status(400).json({ error: 'Missing wallet or X username' });
-  }
-  try {
-    await db.query('UPDATE players SET x_username = $1 WHERE wallet_address = $2', [xUsername.trim(), wallet]);
-    res.json({ success: true, xUsername: xUsername.trim() });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Verify Twitter share for Giveaway Entry
-app.post('/api/giveaways/:id/verify-share', async (req, res) => {
-  const { wallet, tweetUrl } = req.body;
-  const giveawayId = req.params.id;
-  if (!wallet || !tweetUrl) {
-    return res.status(400).json({ error: 'Missing wallet or Tweet URL' });
-  }
-  try {
-    const playerRes = await db.query('SELECT x_username FROM players WHERE wallet_address = $1', [wallet]);
-    const xUsername = playerRes.rows[0]?.x_username;
-    if (!xUsername) {
-      return res.status(400).json({ error: 'Please link your Twitter (X) account first' });
-    }
-
-    // Fetch Tweet from Twitter OEmbed API
-    const oembedUrl = `https://publish.twitter.com/oembed?url=${encodeURIComponent(tweetUrl)}`;
-    const oembedRes = await fetch(oembedUrl);
-    if (!oembedRes.ok) {
-      return res.status(400).json({ error: 'Failed to fetch tweet details. Make sure the URL is correct and public.' });
-    }
-    const oembedData = await oembedRes.json();
-    const tweetHtml = oembedData.html || '';
-
-    const hasPlatform = tweetHtml.toLowerCase().includes('rps') || tweetHtml.toLowerCase().includes('flappycat');
-    const hasUser = tweetHtml.toLowerCase().includes(`twitter.com/${xUsername.toLowerCase()}`) || 
-                    tweetHtml.toLowerCase().includes(`@${xUsername.toLowerCase()}`);
-
-    if (!hasPlatform) {
-      return res.status(400).json({ error: 'Tweet does not mention our platform website link' });
-    }
-    if (!hasUser) {
-      return res.status(400).json({ error: 'Tweet handle does not match your linked X username' });
-    }
-
-    await db.query(
-      `INSERT INTO giveaway_entries (giveaway_id, wallet_address, tweet_url)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (giveaway_id, wallet_address) DO UPDATE SET tweet_url = EXCLUDED.tweet_url`,
-      [giveawayId, wallet, tweetUrl]
-    );
-
-    res.json({ success: true, message: 'Giveaway entry verified successfully!' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // ─────────────────────────────────────────────
-// Static Files
+// Static Files (SPA)
 // ─────────────────────────────────────────────
 
 const clientDistPath = path.join(__dirname, '../frontend/dist');
@@ -1185,7 +1714,7 @@ app.get('*', (_req, res) => {
   if (fs.existsSync(path.join(clientDistPath, 'index.html'))) {
     res.sendFile(path.join(clientDistPath, 'index.html'));
   } else {
-    res.status(404).send('Build the frontend first.');
+    res.status(404).send('Build the frontend first: npm run build in /frontend');
   }
 });
 
@@ -1194,6 +1723,7 @@ module.exports = server;
 if (require.main === module) {
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`RPS Multiplayer server running on Port ${PORT}`);
+    console.log(`CORS allowed origin: ${ALLOWED_ORIGIN}`);
   });
 
   // Active Lobby Broadcasting Interval (every 6 seconds)
@@ -1201,7 +1731,7 @@ if (require.main === module) {
     broadcastLobbyState();
   }, 6000);
 
-  // Active Expiration Cleanup (every 1 minute)
+  // Active Expiration Cleanup (every 1 minute) — custom rooms
   setInterval(async () => {
     try {
       const res = await db.query("DELETE FROM rooms WHERE id LIKE 'room_%' AND status = 'OPEN' AND expires_at <= NOW()");
@@ -1213,4 +1743,23 @@ if (require.main === module) {
       console.error('Error cleaning up expired custom rooms:', err.message);
     }
   }, 60000);
+
+  // AFK Waiting Room Cleanup — delete OPEN tier rooms with no player2 for 30+ minutes
+  setInterval(async () => {
+    try {
+      const res = await db.query(`
+        DELETE FROM rooms
+        WHERE status = 'OPEN'
+          AND player2_wallet IS NULL
+          AND id LIKE 'tier_%'
+          AND created_at <= NOW() - INTERVAL '30 minutes'
+      `);
+      if (res.rowCount > 0) {
+        console.log(`Cleaned up ${res.rowCount} abandoned tier rooms.`);
+        broadcastLobbyState();
+      }
+    } catch (err) {
+      console.error('Error cleaning up abandoned tier rooms:', err.message);
+    }
+  }, 5 * 60 * 1000); // every 5 minutes
 }

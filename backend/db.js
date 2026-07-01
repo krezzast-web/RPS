@@ -25,6 +25,7 @@ async function initDb() {
       custodial_wallet_address VARCHAR(100),
       custodial_wallet_secret TEXT,
       x_username VARCHAR(100),
+      custodial_synced_sol DECIMAL(18,9) DEFAULT 0,
       last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -88,6 +89,12 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS message_likes (
+      message_id INT REFERENCES messages(id) ON DELETE CASCADE,
+      wallet_address VARCHAR(100) REFERENCES players(wallet_address) ON DELETE CASCADE,
+      PRIMARY KEY (message_id, wallet_address)
+    );
+
     CREATE TABLE IF NOT EXISTS giveaways (
       id SERIAL PRIMARY KEY,
       title VARCHAR(200) NOT NULL,
@@ -136,6 +143,21 @@ async function initDb() {
       username VARCHAR(50) UNIQUE NOT NULL,
       password_hash VARCHAR(255) NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS player_reports (
+      id SERIAL PRIMARY KEY,
+      reporter_wallet VARCHAR(100) REFERENCES players(wallet_address) ON DELETE CASCADE,
+      reported_wallet VARCHAR(100) REFERENCES players(wallet_address) ON DELETE CASCADE,
+      reason TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS block_list (
+      wallet_address VARCHAR(100) REFERENCES players(wallet_address) ON DELETE CASCADE,
+      blocked_wallet VARCHAR(100) REFERENCES players(wallet_address) ON DELETE CASCADE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (wallet_address, blocked_wallet)
     );
   `;
 

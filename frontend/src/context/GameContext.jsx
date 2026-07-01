@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, useRef } from 'react';
+import React, { createContext, useState, useContext, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
 
 const GameContext = createContext();
@@ -58,15 +58,100 @@ export const GameProvider = ({ children }) => {
   const [chatTab, setChatTab] = useState('general');
   const [chatMessages, setChatMessages] = useState([]);
 
-  // Users in room list (track by socket)
   const [usersInRoom] = useState([]);
+
+  // Custom Notifications & Confirmations
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState('info'); // 'info' | 'success' | 'error'
+  const [showToast, setShowToast] = useState(false);
+
+  const [confirmConfig, setConfirmConfig] = useState(null); // { message, onConfirm, onCancel }
+
+  // Helpers for toast/confirm
+  const triggerToast = useCallback((msg, type = 'info') => {
+    setToastMessage(msg);
+    setToastType(type);
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 5000);
+  }, []);
+
+  const triggerConfirm = useCallback((message, onConfirm, onCancel) => {
+    setConfirmConfig({ message, onConfirm, onCancel });
+  }, []);
+
+  // Web Audio Synth Chime
+  const playMatchFoundChime = () => {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      
+      const playTone = (freq, time, duration) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.setValueAtTime(freq, time);
+        gain.gain.setValueAtTime(0.15, time);
+        gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
+        osc.start(time);
+        osc.stop(time + duration);
+      };
+
+      const now = ctx.currentTime;
+      playTone(523.25, now, 0.15); // C5
+      playTone(659.25, now + 0.12, 0.15); // E5
+      playTone(783.99, now + 0.24, 0.4); // G5
+    } catch (e) {
+      console.warn('Audio chime failed to play', e);
+    }
+  };
+
+  // Browser tab title flashing
+  const titleFlashIntervalRef = useRef(null);
+  const flashTabTitle = () => {
+    if (document.hasFocus()) return;
+    if (titleFlashIntervalRef.current) clearInterval(titleFlashIntervalRef.current);
+    let flash = false;
+    titleFlashIntervalRef.current = setInterval(() => {
+      document.title = flash ? '⚔️ MATCH FOUND! ⚔️' : 'Rpsroom — Play & Win';
+      flash = !flash;
+    }, 1000);
+  };
+
+  // Clear tab title flashing on focus
+  React.useEffect(() => {
+    const handleFocus = () => {
+      if (titleFlashIntervalRef.current) {
+        clearInterval(titleFlashIntervalRef.current);
+        titleFlashIntervalRef.current = null;
+        document.title = 'Rpsroom — Play & Win';
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, []);
 
   const socketRef = useRef(null);
   const walletRef = useRef('');
+  const tokenRef = useRef(''); // Session JWT for authenticated API calls
+  const currentRoomPlayer1WalletRef = useRef('');
 
-  // Setup all socket event listeners in a reusable way
+  // ─── Auth Fetch Helper ───────────────────────────────────────────────
+  const authFetch = useCallback((url, options = {}) => {
+    const token = tokenRef.current || localStorage.getItem('rps_wallet_token') || '';
+    return fetch(url, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(options.headers || {})
+      }
+    });
+  }, []);
+
+  // ─── Socket Listeners ────────────────────────────────────────────────
   const setupSocketListeners = (socket) => {
-    // Profile sync from server
     socket.on('profile_sync', (profile) => {
       setUsername(profile.username);
       setRpsRating(profile.rating);
@@ -78,7 +163,6 @@ export const GameProvider = ({ children }) => {
       setXUsername(profile.xUsername || '');
     });
 
-    // Full lobby state from server — replaces ALL fake local data
     socket.on('lobby_update', (lobbyData) => {
       setCustomRooms(lobbyData.customRooms || []);
       setTopRanks(lobbyData.topRanks || []);
@@ -94,6 +178,10 @@ export const GameProvider = ({ children }) => {
       socket.emit('join_room', { roomId });
     });
 
+    socket.on('create_room_error', (msg) => {
+      triggerToast(`Could not create room: ${msg}`, 'error');
+    });
+
     socket.on('room_sync', (syncData) => {
       setActiveRoom({
         id: syncData.roomId,
@@ -102,12 +190,12 @@ export const GameProvider = ({ children }) => {
         feeRate: syncData.feeRate,
         player1Wallet: syncData.player1.wallet
       });
+      currentRoomPlayer1WalletRef.current = syncData.player1.wallet;
 
       const isPlayer1 = syncData.player1.wallet === walletRef.current;
       const myData = isPlayer1 ? syncData.player1 : syncData.player2;
       const oppData = isPlayer1 ? syncData.player2 : syncData.player1;
 
-      // Sync YOUR real stats
       if (myData) {
         setPlayerWins(myData.wins || 0);
         setPlayerLosses(myData.losses || 0);
@@ -115,7 +203,6 @@ export const GameProvider = ({ children }) => {
         setPlayerHistory(myData.history || []);
       }
 
-      // Sync opponent's real stats
       if (oppData) {
         setOpponent({
           name: oppData.name,
@@ -134,8 +221,23 @@ export const GameProvider = ({ children }) => {
       setRoundNum(syncData.roundNum);
       setPlayerScore(isPlayer1 ? syncData.player1Score : syncData.player2Score);
       setOpponentScore(isPlayer1 ? syncData.player2Score : syncData.player1Score);
+      
+      // Play sound and flash tab title if opponent joins
+      if (syncData.matchmakingState === 'opponent_joined' && matchmakingState === 'waiting_for_opponent') {
+        playMatchFoundChime();
+        flashTabTitle();
+      }
+
       setMatchmakingState(syncData.matchmakingState);
       setActiveView('game');
+    });
+
+    socket.on('room_timeout', ({ message }) => {
+      triggerToast(message || 'Room closed due to inactivity.', 'error');
+      setActiveView('lobby');
+      setActiveRoom(null);
+      setOpponent(null);
+      setMatchmakingState('waiting_for_opponent');
     });
 
     socket.on('ready_status', (status) => {
@@ -160,6 +262,10 @@ export const GameProvider = ({ children }) => {
 
     socket.on('move_locked', () => {
       setUserLockedSelection(true);
+    });
+
+    socket.on('move_error', (msg) => {
+      triggerToast(`Move error: ${msg}`, 'error');
     });
 
     socket.on('round_resolved', (resolution) => {
@@ -224,13 +330,13 @@ export const GameProvider = ({ children }) => {
     });
 
     socket.on('join_error', (err) => {
-      alert(`Could not join room: ${err}`);
+      triggerToast(`Could not join room: ${err}`, 'error');
       setActiveView('lobby');
       setActiveRoom(null);
     });
   };
 
-  // Initialize socket on mount so guests can view the lobby instantly
+  // ─── Initialize socket on mount ─────────────────────────────────────
   React.useEffect(() => {
     const socketUrl = window.location.origin.includes('localhost')
       ? 'http://localhost:5000'
@@ -240,10 +346,12 @@ export const GameProvider = ({ children }) => {
 
     setupSocketListeners(socket);
 
-    // Auto-reconnect if previously connected
+    // Auto-reconnect with saved wallet + token
     const savedWallet = localStorage.getItem('rps_wallet_address');
+    const savedToken = localStorage.getItem('rps_wallet_token');
     if (savedWallet) {
       walletRef.current = savedWallet;
+      tokenRef.current = savedToken || '';
       setWalletAddress(savedWallet);
       setWalletConnected(true);
       socket.emit('join_lobby', savedWallet);
@@ -251,19 +359,62 @@ export const GameProvider = ({ children }) => {
       socket.emit('join_lobby', null);
     }
 
+    // Auto-join deep link handler
+    const params = new URLSearchParams(window.location.search);
+    const deepLinkRoom = params.get('room');
+    if (deepLinkRoom && savedWallet) {
+      setTimeout(() => {
+        socket.emit('join_room', { roomId: deepLinkRoom });
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }, 1000);
+    }
+
     return () => {
       socket.disconnect();
     };
   }, []);
 
+  // ─── Wallet Auth — Sign nonce with Phantom ──────────────────────────
+  const authenticateWallet = async (provider, pubKey) => {
+    try {
+      const nonceRes = await fetch(`/api/auth/nonce/${pubKey}`);
+      if (!nonceRes.ok) throw new Error('Failed to get auth nonce');
+      const { message } = await nonceRes.json();
+
+      const encodedMessage = new TextEncoder().encode(message);
+      const result = await provider.signMessage(encodedMessage, 'utf8');
+      const signature = result.signature;
+
+      const signatureBase64 = btoa(String.fromCharCode(...new Uint8Array(signature)));
+
+      const authRes = await fetch('/api/auth/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet: pubKey, signature: signatureBase64 })
+      });
+      const authData = await authRes.json();
+
+      if (!authRes.ok) throw new Error(authData.error || 'Authentication failed');
+
+      const token = authData.token;
+      localStorage.setItem('rps_wallet_token', token);
+      tokenRef.current = token;
+      return token;
+    } catch (err) {
+      console.error('Wallet authentication failed:', err.message);
+      throw err;
+    }
+  };
+
+  // ─── Connect Wallet ──────────────────────────────────────────────────
   const connectWallet = async () => {
     try {
       const isPhantom = window.solana && window.solana.isPhantom;
       const isSolflare = window.solflare && window.solflare.isSolflare;
 
       if (!isPhantom && !isSolflare) {
-        alert("Solana wallet not found! Please install Phantom Wallet (https://phantom.app) or Solflare to play.");
-        window.open("https://phantom.app", "_blank");
+        triggerToast('Solana wallet not found! Redirecting to Phantom setup...', 'error');
+        window.open('https://phantom.app', '_blank');
         return;
       }
 
@@ -273,25 +424,26 @@ export const GameProvider = ({ children }) => {
 
       walletRef.current = pubKey;
       setWalletAddress(pubKey);
-      setWalletConnected(true);
       localStorage.setItem('rps_wallet_address', pubKey);
 
-      // Upgrade socket session to authenticated wallet
+      await authenticateWallet(provider, pubKey);
+
+      setWalletConnected(true);
+
       if (socketRef.current) {
         socketRef.current.emit('join_lobby', pubKey);
       }
     } catch (err) {
-      console.error("Wallet connection failed:", err);
+      console.error('Wallet connection failed:', err.message);
+      triggerToast('Wallet connection failed: ' + err.message, 'error');
     }
   };
 
-  // Ref to track player1 wallet of the current room (solves stale closure in round_resolved)
-  const currentRoomPlayer1WalletRef = useRef('');
-
-  const joinRoom = (room) => {
+  // ─── Join Room ───────────────────────────────────────────────────────
+  const joinRoom = (room, password = '') => {
     if (!walletConnected) { connectWallet(); return; }
     if (!xUsername) {
-      alert("Please connect your Twitter (X) account in the header first to play!");
+      triggerToast('Please link your Twitter (X) account first to play!', 'error');
       return;
     }
 
@@ -302,35 +454,38 @@ export const GameProvider = ({ children }) => {
 
     setTimeout(() => {
       if (socketRef.current) {
-        socketRef.current.emit('join_room', { roomId: room.id });
+        socketRef.current.emit('join_room', { roomId: room.id, password });
       }
     }, 500);
   };
 
-  const joinRoomWithRef = (room) => {
-    joinRoom(room);
-  };
+  const joinRoomWithRef = (room, password = '') => joinRoom(room, password);
 
+  // ─── Link X Account ──────────────────────────────────────────────────
   const linkXAccount = async (xUser) => {
     if (!walletAddress) return;
     try {
-      const res = await fetch('/api/wallet/link-x', {
+      const res = await authFetch('/api/wallet/link-x', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ wallet: walletAddress, xUsername: xUser })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setXUsername(data.xUsername);
+      triggerToast('Twitter account linked successfully!', 'success');
       return data;
     } catch (err) {
       console.error('X account linking failed:', err.message);
+      triggerToast('Failed to link Twitter account: ' + err.message, 'error');
       throw err;
     }
   };
 
+  // ─── Disconnect Wallet ───────────────────────────────────────────────
   const disconnectWallet = () => {
     localStorage.removeItem('rps_wallet_address');
+    localStorage.removeItem('rps_wallet_token');
+    tokenRef.current = '';
     if (socketRef.current) {
       setWalletConnected(false);
       setWalletAddress('');
@@ -344,6 +499,7 @@ export const GameProvider = ({ children }) => {
     }
   };
 
+  // ─── Game Actions ────────────────────────────────────────────────────
   const setPlayerReady = () => {
     setUserReady(true);
     if (socketRef.current) socketRef.current.emit('set_ready');
@@ -365,30 +521,33 @@ export const GameProvider = ({ children }) => {
     currentRoomPlayer1WalletRef.current = '';
   };
 
+  // ─── Chat ────────────────────────────────────────────────────────────
   const sendChatMessage = (text) => {
     if (socketRef.current) {
+      const cleanText = String(text || '').trim().slice(0, 300);
+      if (!cleanText) return;
       socketRef.current.emit('send_chat', {
         roomId: activeView === 'game' ? activeRoom?.id : null,
-        text
+        text: cleanText
       });
     }
   };
 
-  const likeMessage = (id) => {
+  const likeMessage = async (id) => {
     setChatMessages(prev => prev.map(msg =>
       msg.id === id ? { ...msg, likes: msg.likes + 1 } : msg
     ));
+    try {
+      await authFetch(`/api/messages/${id}/like`, { method: 'POST' });
+    } catch (err) {
+      console.error('Like failed:', err.message);
+    }
   };
 
-  const triggerOpponentAFK = () => {};
-  const getBackToGame = () => {};
-  const kickUser = () => {};
-  const searchAnotherRoom = () => { leaveRoom(); };
-  const waitNextOpponent = () => {};
-
+  // ─── Create Custom Room ──────────────────────────────────────────────
   const createCustomRoom = (name, betSol, feeRate, password, expirationHours) => {
     if (!xUsername) {
-      alert("Please connect your Twitter (X) account in the header first to play!");
+      triggerToast('Please link your Twitter (X) account first to play!', 'error');
       return;
     }
     if (socketRef.current) {
@@ -400,6 +559,36 @@ export const GameProvider = ({ children }) => {
         roomPassword: password,
         expirationHours
       });
+    }
+  };
+
+  // ─── Stub Implementations ────────────────────────────────────────────
+  const triggerOpponentAFK = () => {
+    triggerToast('Opponent AFK reported.', 'info');
+    leaveRoom();
+  };
+
+  const getBackToGame = () => {
+    setMatchmakingState('playing_10s');
+  };
+
+  const kickUser = () => {
+    triggerToast('Kick function is admin-only.', 'error');
+  };
+
+  const searchAnotherRoom = () => {
+    leaveRoom();
+  };
+
+  const waitNextOpponent = () => {
+    setMatchmakingState('waiting_for_opponent');
+    setPlayerSelection(null);
+    setOpponentSelection(null);
+    setBattleResult(null);
+    setUserReady(false);
+    setOpponentReady(false);
+    if (socketRef.current && activeRoom) {
+      socketRef.current.emit('join_room', { roomId: activeRoom.id });
     }
   };
 
@@ -420,7 +609,10 @@ export const GameProvider = ({ children }) => {
       joinRoom: joinRoomWithRef, leaveRoom,
       setPlayerReady, makeMove,
       triggerOpponentAFK, getBackToGame, kickUser, searchAnotherRoom, waitNextOpponent,
-      sendChatMessage, likeMessage, linkXAccount
+      sendChatMessage, likeMessage, linkXAccount,
+      authFetch,
+      toastMessage, toastType, showToast, triggerToast, setShowToast,
+      confirmConfig, triggerConfirm, setConfirmConfig
     }}>
       {children}
     </GameContext.Provider>
